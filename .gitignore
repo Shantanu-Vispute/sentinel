@@ -1,0 +1,12 @@
+state/
+digests/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.DS_Store
+.ruff_cache/
+.venv/
+venv/
+.vscode/

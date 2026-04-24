@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ story.title }} · Sentinel</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #FAF9F5; --surface: #F3EFE6; --border: #E7E1D4; --border-strong: #D7CFBD;
+  --text: #1F1E1D; --text-muted: #6B6660; --text-subtle: #94908A;
+  --accent: #C15F3C; --accent-soft: #F3E0D5;
+}
+html[data-theme="dark"] {
+  --bg: #262624; --surface: #2F2E2B; --border: #3A3936; --border-strong: #4A4844;
+  --text: #EDE9DE; --text-muted: #B4ADA0; --text-subtle: #857F72;
+  --accent: #D97757; --accent-soft: #3D2F28;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: "Source Serif 4", Georgia, serif;
+  background: var(--bg); color: var(--text);
+  font-size: 17px; line-height: 1.6;
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 60px 32px 120px; }
+.back {
+  display: inline-block; font-family: "Inter", sans-serif; font-size: 13px;
+  color: var(--text-subtle); text-decoration: none; margin-bottom: 28px;
+}
+.back:hover { color: var(--accent); }
+h1.title {
+  font-family: "Inter", sans-serif; font-size: 34px; font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1.2; margin: 0 0 10px;
+}
+.meta {
+  font-family: "Inter", sans-serif; font-size: 13px; color: var(--text-subtle);
+  margin-bottom: 28px; display: flex; gap: 14px; flex-wrap: wrap;
+}
+.summary {
+  font-size: 17px; color: var(--text); margin: 0 0 32px;
+  padding-left: 18px; border-left: 3px solid var(--accent);
+}
+h2.section {
+  font-family: "Inter", sans-serif; font-size: 18px; font-weight: 600;
+  letter-spacing: -0.01em; margin: 36px 0 16px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline { list-style: none; padding: 0; margin: 0; }
+.timeline li {
+  position: relative; padding: 10px 0 10px 24px; margin: 0;
+  border-left: 2px solid var(--border);
+}
+.timeline li::before {
+  content: ""; position: absolute; left: -5px; top: 18px;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+}
+.timeline .date {
+  font-family: "Inter", sans-serif; font-size: 12px; color: var(--text-subtle);
+  margin-bottom: 4px;
+}
+.timeline .what { font-size: 15px; color: var(--text); }
+.timeline .trigger {
+  font-family: "Inter", sans-serif; font-size: 12px; color: var(--text-subtle); margin-top: 4px;
+}
+
+.mentions { list-style: none; padding: 0; margin: 0; }
+.mention {
+  padding: 14px 0; border-bottom: 1px solid var(--border);
+}
+.mention:last-child { border-bottom: 0; }
+.mention .mhdr {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  font-family: "Inter", sans-serif; font-size: 13px; color: var(--text-subtle);
+  margin-bottom: 6px;
+}
+.mention .sender { color: var(--text-muted); font-weight: 500; }
+.mention .new-info-badge {
+  color: var(--accent); font-weight: 600; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.mention .mtitle {
+  font-family: "Inter", sans-serif; font-size: 15px; font-weight: 600;
+  color: var(--text); margin-bottom: 4px;
+}
+.mention .msummary { font-size: 14.5px; color: var(--text-muted); }
+.mention a {
+  display: inline-block; font-family: "Inter", sans-serif; font-size: 12.5px;
+  color: var(--accent); text-decoration: none; margin-top: 6px;
+}
+.mention a:hover { text-decoration: underline; }
+
+.theme-toggle {
+  position: fixed; top: 16px; right: 20px; z-index: 10;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
+  width: 36px; height: 36px; border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 15px;
+}
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+html[data-theme="dark"] .sun { display: none; }
+html:not([data-theme="dark"]) .moon { display: none; }
+</style>
+<script>
+(function () {
+  var saved = localStorage.getItem("theme");
+  if (saved === "dark" || (saved === null && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+})();
+</script>
+</head>
+<body>
+<button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+  <span class="sun">☀</span><span class="moon">☾</span>
+</button>
+
+<div class="wrap">
+  <a class="back" href="/digest">← all stories</a>
+
+  <h1 class="title">{{ story.title }}</h1>
+
+  <div class="meta">
+    <span>{{ story.mention_count }} mention{{ '' if story.mention_count == 1 else 's' }}</span>
+    {% if story.new_info_count %}<span>· {{ story.new_info_count }} with new info</span>{% endif %}
+    <span>· first seen {{ story.first_seen[:10] }}</span>
+    <span>· updated {{ story.last_updated[:10] }}</span>
+  </div>
+
+  <p class="summary">{{ story.summary }}</p>
+
+  {% if timeline %}
+    <h2 class="section">Timeline</h2>
+    <ul class="timeline">
+      {% for t in timeline %}
+        <li>
+          <div class="date">{{ t.date[:10] }}</div>
+          <div class="what">{{ t.what_changed }}</div>
+          {% if t.trigger_sender %}<div class="trigger">— {{ t.trigger_sender }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <h2 class="section">Mentions ({{ mentions|length }})</h2>
+  <ul class="mentions">
+    {% for m in mentions %}
+      <li class="mention">
+        <div class="mhdr">
+          <span class="sender">{{ m.sender }}</span>
+          <span>
+            {% if m.added_new_info %}<span class="new-info-badge">new info</span>{% endif %}
+            · {{ m.date[:10] }}
+          </span>
+        </div>
+        {% if m.title %}<div class="mtitle">{{ m.title }}</div>{% endif %}
+        {% if m.summary %}<div class="msummary">{{ m.summary }}</div>{% endif %}
+        {% if m.gmail_url %}<a href="{{ m.gmail_url }}" target="_blank" rel="noopener">open source →</a>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</div>
+
+<script>
+document.getElementById("themeToggle").addEventListener("click", function () {
+  var html = document.documentElement;
+  var next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  if (next === "dark") html.setAttribute("data-theme", "dark"); else html.removeAttribute("data-theme");
+  localStorage.setItem("theme", next);
+});
+</script>
+</body>
+</html>
