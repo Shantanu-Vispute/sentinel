@@ -268,7 +268,7 @@ def _ensure_external_state_table(conn: sqlite3.Connection) -> None:
 def _external_row_to_story(row: sqlite3.Row) -> dict:
     source = row["source"] or "external"
     created_ts = row["created_ts"] or row["last_seen_at"] or row["scraped_at"] or 0
-    updated_ts = row["created_ts"] or row["last_seen_at"] or row["scraped_at"] or created_ts
+    saved_ts = row["scraped_at"] or row["last_seen_at"] or row["created_ts"] or created_ts
     source_rank = row["source_rank"] if "source_rank" in row.keys() else None
     primary_url = row["url"] or ""
     author = row["author"] or ""
@@ -293,7 +293,7 @@ def _external_row_to_story(row: sqlite3.Row) -> dict:
         "new_info_count": 0,
         "is_read": bool(row["is_read"] or 0),
         "first_seen": _iso_from_ts(created_ts),
-        "last_updated": _iso_from_ts(updated_ts),
+        "last_updated": _iso_from_ts(saved_ts),
         "age_days": None,
         "skipped": bool(row["skipped"] or 0),
         "source_type": source,
@@ -303,7 +303,7 @@ def _external_row_to_story(row: sqlite3.Row) -> dict:
         "senders": [author] if author else [source],
         "author": author,
         "source_rank": int(source_rank or 0),
-        "sort_ts": updated_ts,
+        "sort_ts": saved_ts,
     }
 
 def _load_external_stories(conn: sqlite3.Connection) -> list[dict]:
@@ -847,6 +847,25 @@ def api_digest_skip():
     if cur.rowcount == 0:
         _mark_external_state(story_id, skipped=value)
     return jsonify({"id": story_id, "skipped": value})
+
+
+@app.route("/api/digest/read", methods=["POST"])
+def api_digest_read():
+    data = request.get_json(silent=True) or {}
+    story_id = (data.get("id") or "").strip()
+    value = 1 if data.get("value", 1) else 0
+    if not story_id:
+        return jsonify({"error": "missing id"}), 400
+    conn = _stories_conn(readonly=False)
+    if conn is None:
+        return jsonify({"error": "no stories db"}), 500
+    cur = conn.execute(
+        "UPDATE stories SET is_read=? WHERE id=?", (value, story_id))
+    conn.commit()
+    conn.close()
+    if cur.rowcount == 0:
+        _mark_external_state(story_id, is_read=value)
+    return jsonify({"id": story_id, "is_read": value})
 
 
 @app.route("/api/digest/sync", methods=["POST"])
