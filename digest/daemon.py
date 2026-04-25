@@ -145,6 +145,8 @@ def _persist_story(
             date=story.date,
             added_new_info=adds_new_info,
             source_type=source_type,
+            raw_title=story.source_newsletter,
+            raw_body=story.source_email_body,
         )
 
         if adds_new_info and what_changed:
@@ -176,6 +178,8 @@ def _persist_story(
             date=story.date,
             mention_title=story.title,
             mention_summary=story.summary,
+            mention_raw_title=story.source_newsletter,
+            mention_raw_body=story.source_email_body,
             category="other",
             primary_url=getattr(story, "primary_url", ""),
             source_type=source_type,
