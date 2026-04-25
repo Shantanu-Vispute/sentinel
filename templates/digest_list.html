@@ -453,6 +453,17 @@ html:not([data-theme="dark"]) .moon { display: none; }
   </div>
 </div>
 
+{% macro nav_url(src=none, st=none) -%}
+  /digest?
+  {%- set parts = [] -%}
+  {%- set src_val = source if src is none else src -%}
+  {%- set st_val = state if st is none else st -%}
+  {%- if q %}{% set _ = parts.append('q=' ~ (q | urlencode)) %}{% endif -%}
+  {%- if sort and sort != 'recent' %}{% set _ = parts.append('sort=' ~ sort) %}{% endif -%}
+  {%- if src_val and src_val != 'all' %}{% set _ = parts.append('source=' ~ src_val) %}{% endif -%}
+  {%- if st_val %}{% set _ = parts.append('state=' ~ st_val) %}{% endif -%}
+  {{- parts | join('&') -}}
+{%- endmacro %}
 <div class="layout">
   <aside class="sidebar">
     <div class="sidebar-header">
@@ -461,10 +472,17 @@ html:not([data-theme="dark"]) .moon { display: none; }
     </div>
     <div class="section-label">Sources</div>
     <ul class="side-nav">
-      <li><a href="/digest?source=all" class="{% if source == 'all' %}active{% endif %}">All <span class="count">{{ total_all }}</span></a></li>
+      <li><a href="{{ nav_url(src='all') }}" class="{% if source == 'all' %}active{% endif %}">All <span class="count">{{ total_all }}</span></a></li>
       {% for item in source_counts %}
-        <li><a href="/digest?source={{ item.source }}" class="{% if source == item.source %}active{% endif %}">{{ item.label }} <span class="count">{{ item.count }}</span></a></li>
+        <li><a href="{{ nav_url(src=item.source) }}" class="{% if source == item.source %}active{% endif %}">{{ item.label }} <span class="count">{{ item.count }}</span></a></li>
       {% endfor %}
+    </ul>
+    <div class="section-label">State</div>
+    <ul class="side-nav">
+      <li><a href="{{ nav_url(st='') }}"        class="{% if not state         %}active{% endif %}">All</a></li>
+      <li><a href="{{ nav_url(st='unread') }}"  class="{% if state == 'unread' %}active{% endif %}">Unread</a></li>
+      <li><a href="{{ nav_url(st='read') }}"    class="{% if state == 'read'   %}active{% endif %}">Read</a></li>
+      <li><a href="{{ nav_url(st='skipped') }}" class="{% if state == 'skipped'%}active{% endif %}">Skipped</a></li>
     </ul>
   </aside>
 
@@ -756,13 +774,10 @@ document.getElementById("themeToggle").addEventListener("click", function () {
         body: JSON.stringify({ id: id, value: 1 })
       }).then(function () {
         card.classList.remove("unread");
-        var state = new URLSearchParams(window.location.search).get("state");
-        if (state === "unread") {
-          card.style.transition = "opacity 180ms, transform 180ms";
-          card.style.opacity = "0";
-          card.style.transform = "scale(0.95)";
-          setTimeout(function () { card.remove(); }, 200);
-        }
+        card.style.transition = "opacity 180ms, transform 180ms";
+        card.style.opacity = "0";
+        card.style.transform = "scale(0.95)";
+        setTimeout(function () { card.remove(); }, 200);
       });
     }, true);
     btn.addEventListener("mousedown", function (e) { e.stopPropagation(); }, true);
