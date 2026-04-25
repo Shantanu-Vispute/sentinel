@@ -185,9 +185,10 @@ def upsert(videos: list[dict]) -> int:
         else:
             excerpt = uploader or ""
 
+        created_ts = now - max(playlist_index - 1, 0)
         rows.append(
             (
-                ext_id, "youtube", url, title, excerpt, thumb, uploader, now,
+                ext_id, "youtube", url, title, excerpt, thumb, uploader, created_ts,
                 now, now,
                 "", "[]", None, "", None, "watch later", playlist_index,
             )
