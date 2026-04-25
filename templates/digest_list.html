@@ -602,7 +602,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
                 </a>
               {% endif %}
               {% if s.last_updated_relative %}
-                <span title="{{ s.last_updated }}">{{ s.last_updated_relative }}</span>
+                <span title="{{ s.last_updated_display or s.last_updated }}">{{ s.last_updated_relative }}</span>
               {% endif %}
             </div>
             </div>

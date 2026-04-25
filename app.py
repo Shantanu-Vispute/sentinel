@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 
 import humanize
@@ -90,7 +91,10 @@ def _parse_iso_dt(s: str) -> datetime | None:
     try:
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
-        return None
+        try:
+            dt = parsedate_to_datetime(s)
+        except Exception:
+            return None
     if dt.tzinfo is not None:
         return dt.astimezone(timezone.utc)
 
@@ -111,6 +115,9 @@ def _parse_iso_dt(s: str) -> datetime | None:
 
 def _relative_time_label(s: str) -> str:
     dt = _parse_iso_dt(s)
+    return _relative_time_label_dt(dt)
+
+def _relative_time_label_dt(dt: datetime | None) -> str:
     if dt is None:
         return ""
     try:
@@ -557,18 +564,26 @@ def digest_list():
             LIMIT 2000"""
     ).fetchall()
     mention_rows = conn.execute(
-        "SELECT story_id, sender, COALESCE(source_type, 'email') AS source_type FROM mentions"
+        """SELECT story_id, sender, date, COALESCE(source_type, 'email') AS source_type
+             FROM mentions"""
     ).fetchall()
     external_stories = _load_external_stories(conn)
     conn.close()
 
     senders_by_story: dict[str, list[str]] = {}
     mention_sources_by_story: dict[str, list[str]] = {}
+    latest_mention_dt_by_story: dict[str, datetime] = {}
     for row in mention_rows:
         senders_by_story.setdefault(row["story_id"], []).append(row["sender"] or "")
         mention_sources_by_story.setdefault(
             row["story_id"], []
         ).append((row["source_type"] or "email").strip().lower())
+        mention_dt = _parse_iso_dt(row["date"] or "")
+        if mention_dt is None:
+            continue
+        current_dt = latest_mention_dt_by_story.get(row["story_id"])
+        if current_dt is None or mention_dt > current_dt:
+            latest_mention_dt_by_story[row["story_id"]] = mention_dt
 
     now_t = int(time.time())
     q = (request.args.get("q") or "").strip()
@@ -582,6 +597,15 @@ def digest_list():
 
     for row in rows:
         ts = _parse_iso_ts(row["last_updated"])
+        latest_mention_dt = latest_mention_dt_by_story.get(row["id"])
+        source_type = (row["source_type"] or "email").strip().lower()
+        if source_type == "email" and latest_mention_dt is not None:
+            ts = int(latest_mention_dt.timestamp())
+            display_time = latest_mention_dt.astimezone(APP_TIMEZONE).isoformat()
+            display_relative = _relative_time_label_dt(latest_mention_dt)
+        else:
+            display_time = row["last_updated"] or ""
+            display_relative = _relative_time_label(display_time)
         age_days = (now_t - ts) // 86400 if ts else None
         story = {
             "id": row["id"],
@@ -594,12 +618,13 @@ def digest_list():
             "is_read": bool(row["is_read"]),
             "last_updated": row["last_updated"],
             "first_seen": row["first_seen"],
-            "last_updated_relative": _relative_time_label(row["last_updated"] or ""),
+            "last_updated_display": display_time,
+            "last_updated_relative": display_relative,
             "first_seen_relative": _relative_time_label(row["first_seen"] or ""),
             "age_days": age_days,
             "skipped": bool(row["skipped"]),
-            "source_type": row["source_type"] or "email",
-            "source_label": _source_label(row["source_type"] or "email"),
+            "source_type": source_type,
+            "source_label": _source_label(source_type),
             "primary_image_url": row["primary_image_url"] or "",
             "links": _parse_links_json(row["links_json"]),
             "senders": [],
@@ -630,6 +655,7 @@ def digest_list():
     for story in external_stories:
         ts = _parse_iso_ts(story["last_updated"])
         story["age_days"] = (now_t - ts) // 86400 if ts else None
+        story["last_updated_display"] = story.get("last_updated") or ""
         story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
         story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
         if not story["skipped"]:
