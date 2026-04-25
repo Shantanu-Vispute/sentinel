@@ -3,7 +3,9 @@ import json
 import pathlib
 import sqlite3
 import subprocess
+import sys
 import time
+from shutil import which
 from datetime import datetime
 
 HERE = pathlib.Path(__file__).resolve().parent.parent
@@ -14,6 +16,18 @@ DB_PATH = STATE_DIR / "stories.db"
 LOG_PATH = STATE_DIR / "youtube.log"
 
 WATCH_LATER_URL = "https://www.youtube.com/playlist?list=WL"
+
+
+def _resolve_yt_dlp() -> str | None:
+    candidates = []
+    python_bin = pathlib.Path(sys.executable)
+    if python_bin.name.startswith("python"):
+        candidates.append(str(python_bin.with_name("yt-dlp")))
+    candidates.append(which("yt-dlp") or "")
+    for candidate in candidates:
+        if candidate and pathlib.Path(candidate).exists():
+            return candidate
+    return None
 
 def log(msg: str) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -102,8 +116,12 @@ def fetch_watch_later(limit: int | None = None) -> list[dict]:
     if not COOKIES_FILE.exists():
         log("no cookies file — run with --export-cookies first")
         return []
+    yt_dlp_bin = _resolve_yt_dlp()
+    if not yt_dlp_bin:
+        log("yt-dlp is not installed or not on PATH")
+        return []
     cmd = [
-        "yt-dlp",
+        yt_dlp_bin,
         "--cookies", str(COOKIES_FILE),
         "--flat-playlist",
         "--dump-json",
