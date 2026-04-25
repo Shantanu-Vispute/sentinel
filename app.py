@@ -5,6 +5,7 @@ import pathlib
 import re
 import sqlite3
 import subprocess
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -175,47 +176,84 @@ def _renderable_mention(mention: dict) -> dict:
         rendered["summary"] = summary
     return rendered
 
+_HYDRATION_INFLIGHT: set[str] = set()
+_HYDRATION_LOCK = threading.Lock()
+
+
 def _hydrate_email_mentions(conn: sqlite3.Connection, mentions: list[dict]) -> list[dict]:
     cols = _ensure_mentions_raw_columns(conn)
     can_store = "raw_title" in cols and "raw_body" in cols and "id" in cols
-    pending = [
-        mention for mention in mentions
-        if (mention.get("source_type") or "email") == "email"
-        and mention.get("gmail_url")
-        and (not mention.get("raw_title") or not mention.get("raw_body"))
-    ]
-    if not pending:
-        return [_renderable_mention(mention) for mention in mentions]
-    try:
-        service = get_gmail_service()
-    except Exception:
-        return [_renderable_mention(mention) for mention in mentions]
-
-    fetched = {}
-    dirty = False
-    for mention in pending:
-        message_id = message_id_from_gmail_url(mention.get("gmail_url") or "")
-        if not message_id:
-            continue
-        if message_id not in fetched:
-            try:
-                fetched[message_id] = fetch_newsletter_by_id(service, message_id)
-            except Exception:
-                fetched[message_id] = None
-        newsletter = fetched[message_id]
-        if newsletter is None:
-            continue
-        mention["raw_title"] = newsletter.subject
-        mention["raw_body"] = newsletter.body
-        if can_store:
-            conn.execute(
-                "UPDATE mentions SET raw_title=?, raw_body=? WHERE id=?",
-                (newsletter.subject, newsletter.body, mention["id"]),
-            )
-            dirty = True
-    if dirty:
-        conn.commit()
+    if can_store:
+        pending = [
+            {"id": mention["id"], "gmail_url": mention["gmail_url"]}
+            for mention in mentions
+            if (mention.get("source_type") or "email") == "email"
+            and mention.get("gmail_url")
+            and mention.get("id")
+            and (not mention.get("raw_title") or not mention.get("raw_body"))
+        ]
+        if pending:
+            _spawn_gmail_hydration(pending)
     return [_renderable_mention(mention) for mention in mentions]
+
+
+def _spawn_gmail_hydration(pending: list[dict]) -> None:
+    with _HYDRATION_LOCK:
+        fresh = [
+            item for item in pending
+            if item["id"] not in _HYDRATION_INFLIGHT
+        ]
+        if not fresh:
+            return
+        for item in fresh:
+            _HYDRATION_INFLIGHT.add(item["id"])
+    threading.Thread(
+        target=_hydrate_gmail_in_background,
+        args=(fresh,),
+        daemon=True,
+    ).start()
+
+
+def _hydrate_gmail_in_background(pending: list[dict]) -> None:
+    try:
+        try:
+            service = get_gmail_service()
+        except Exception:
+            return
+        conn = _stories_conn(readonly=False)
+        if conn is None:
+            return
+        try:
+            fetched: dict = {}
+            dirty = False
+            for item in pending:
+                message_id = message_id_from_gmail_url(item.get("gmail_url") or "")
+                if not message_id:
+                    continue
+                if message_id not in fetched:
+                    try:
+                        fetched[message_id] = fetch_newsletter_by_id(service, message_id)
+                    except Exception:
+                        fetched[message_id] = None
+                newsletter = fetched[message_id]
+                if newsletter is None:
+                    continue
+                try:
+                    conn.execute(
+                        "UPDATE mentions SET raw_title=?, raw_body=? WHERE id=?",
+                        (newsletter.subject, newsletter.body, item["id"]),
+                    )
+                    dirty = True
+                except Exception:
+                    pass
+            if dirty:
+                conn.commit()
+        finally:
+            conn.close()
+    finally:
+        with _HYDRATION_LOCK:
+            for item in pending:
+                _HYDRATION_INFLIGHT.discard(item["id"])
 
 def _ensure_external_state_table(conn: sqlite3.Connection) -> None:
     conn.execute(
@@ -230,7 +268,7 @@ def _ensure_external_state_table(conn: sqlite3.Connection) -> None:
 def _external_row_to_story(row: sqlite3.Row) -> dict:
     source = row["source"] or "external"
     created_ts = row["created_ts"] or row["last_seen_at"] or row["scraped_at"] or 0
-    updated_ts = row["last_seen_at"] or row["scraped_at"] or created_ts
+    updated_ts = row["created_ts"] or row["last_seen_at"] or row["scraped_at"] or created_ts
     source_rank = row["source_rank"] if "source_rank" in row.keys() else None
     primary_url = row["url"] or ""
     author = row["author"] or ""
