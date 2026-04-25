@@ -131,8 +131,8 @@ html:not([data-theme="dark"]) .moon { display: none; }
   <div class="meta">
     <span>{{ story.mention_count }} mention{{ '' if story.mention_count == 1 else 's' }}</span>
     {% if story.new_info_count %}<span>· {{ story.new_info_count }} with new info</span>{% endif %}
-    <span>· first seen {{ story.first_seen[:10] }}</span>
-    <span>· updated {{ story.last_updated[:10] }}</span>
+    <span title="{{ story.first_seen }}">· first seen {{ story.first_seen_relative }}</span>
+    <span title="{{ story.last_updated }}">· updated {{ story.last_updated_relative }}</span>
   </div>
 
   <p class="summary">{{ story.summary }}</p>
@@ -142,7 +142,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
     <ul class="timeline">
       {% for t in timeline %}
         <li>
-          <div class="date">{{ t.date[:10] }}</div>
+          <div class="date" title="{{ t.date }}">{{ t.date_relative }}</div>
           <div class="what">{{ t.what_changed }}</div>
           {% if t.trigger_sender %}<div class="trigger">— {{ t.trigger_sender }}</div>{% endif %}
         </li>
@@ -158,7 +158,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
           <span class="sender">{{ m.sender }}</span>
           <span>
             {% if m.added_new_info %}<span class="new-info-badge">new info</span>{% endif %}
-            · {{ m.date[:10] }}
+            · <span title="{{ m.date }}">{{ m.date_relative }}</span>
           </span>
         </div>
         {% if m.title %}<div class="mtitle">{{ m.title }}</div>{% endif %}

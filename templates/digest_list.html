@@ -601,8 +601,8 @@ html:not([data-theme="dark"]) .moon { display: none; }
                   {{ s.mention_count }} mention{{ '' if s.mention_count == 1 else 's' }}
                 </a>
               {% endif %}
-              {% if s.age_days is not none %}
-                <span>{% if s.age_days == 0 %}today{% elif s.age_days < 7 %}{{ s.age_days }}d{% elif s.age_days < 30 %}{{ s.age_days // 7 }}w{% else %}{{ s.age_days // 30 }}mo{% endif %}</span>
+              {% if s.last_updated_relative %}
+                <span title="{{ s.last_updated }}">{{ s.last_updated_relative }}</span>
               {% endif %}
             </div>
             </div>
@@ -634,16 +634,14 @@ document.getElementById("themeToggle").addEventListener("click", function () {
   function hostOf(u) {
     try { var h = new URL(u).host; return h.replace(/^www\./, ""); } catch (e) { return ""; }
   }
-	  function fmtDate(s) { return (s || "").slice(0, 10); }
-
 	  function render(story, mentions, timeline) {
 	    var tline = (timeline || []).map(function (t) {
-      return '<li><div class="t-date">' + escape(fmtDate(t.date)) + '</div>' +
+      return '<li><div class="t-date" title="' + escape(t.date || "") + '">' + escape(t.date_relative || "") + '</div>' +
              '<div class="t-what">' + escape(t.what_changed || "") + '</div></li>';
     }).join("");
     var mentHtml = (mentions || []).map(function (m) {
       return '<li><div class="mmhdr"><span class="sender">' + escape(m.sender || "") + '</span>' +
-             '<span>' + escape(fmtDate(m.date)) + '</span></div>' +
+             '<span title="' + escape(m.date || "") + '">' + escape(m.date_relative || "") + '</span></div>' +
              (m.title ? '<div class="mmtitle">' + escape(m.title) + '</div>' : '') +
              (m.summary ? '<div class="mmsummary">' + escape(m.summary) + '</div>' : '') +
 	             (m.gmail_url ? '<a class="mmlink" href="' + escape(m.gmail_url) + '" target="_blank" rel="noopener">open source →</a>' : '') +
@@ -663,13 +661,13 @@ document.getElementById("themeToggle").addEventListener("click", function () {
     var metaBlock = isTelegram
       ? '<div class="mmeta">' +
           '<span>' + escape((mentions[0] && mentions[0].sender) || "") + '</span>' +
-          '<span>· ' + escape(fmtDate(story.last_updated)) + '</span>' +
+          '<span title="' + escape(story.last_updated || "") + '">· ' + escape(story.last_updated_relative || "") + '</span>' +
         '</div>'
       : '<div class="mmeta">' +
           '<span>' + (story.mention_count || 0) + ' mention' + ((story.mention_count || 0) === 1 ? '' : 's') + '</span>' +
           (story.new_info_count ? '<span>· ' + story.new_info_count + ' with new info</span>' : '') +
-          '<span>· first seen ' + escape(fmtDate(story.first_seen)) + '</span>' +
-          '<span>· updated ' + escape(fmtDate(story.last_updated)) + '</span>' +
+          '<span title="' + escape(story.first_seen || "") + '">· first seen ' + escape(story.first_seen_relative || "") + '</span>' +
+          '<span title="' + escape(story.last_updated || "") + '">· updated ' + escape(story.last_updated_relative || "") + '</span>' +
         '</div>';
 
     // For Telegram: prepend the t.me URL as the first chip in the Links section
