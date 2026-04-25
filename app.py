@@ -10,7 +10,7 @@ from datetime import datetime
 from flask import Flask, jsonify, redirect, render_template, request
 from config import STORIES_DB
 from digest.gmail_auth import get_gmail_service
-from digest.gmail_fetcher import fetch_newsletter_by_id, message_id_from_gmail_url
+from digest.gmail_fetcher import fetch_newsletter_by_id, message_id_from_gmail_url, normalize_email_text
 
 HERE = pathlib.Path(__file__).resolve().parent
 STORIES_DB_PATH = pathlib.Path(STORIES_DB)
@@ -126,8 +126,14 @@ def _ensure_mentions_raw_columns(conn: sqlite3.Connection) -> set[str]:
 def _renderable_mention(mention: dict) -> dict:
     rendered = dict(mention)
     if (rendered.get("source_type") or "email") == "email":
-        rendered["title"] = rendered.get("raw_title") or rendered.get("title") or ""
-        rendered["summary"] = rendered.get("raw_body") or rendered.get("summary") or ""
+        title = normalize_email_text(rendered.get("raw_title") or rendered.get("title") or "")
+        summary = normalize_email_text(rendered.get("raw_body") or rendered.get("summary") or "")
+        if title and summary.startswith(title) and len(summary) > len(title):
+            next_char = summary[len(title)]
+            if next_char.isalnum():
+                summary = title + "\n\n" + summary[len(title):].lstrip()
+        rendered["title"] = title
+        rendered["summary"] = summary
     return rendered
 
 def _hydrate_email_mentions(conn: sqlite3.Connection, mentions: list[dict]) -> list[dict]:

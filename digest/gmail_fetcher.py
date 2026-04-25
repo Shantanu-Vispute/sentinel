@@ -1,4 +1,5 @@
 from config import MAX_FETCH_RESULTS
+import html
 import json
 import base64
 import re
@@ -150,6 +151,29 @@ def message_id_from_gmail_url(gmail_url: str) -> str:
         return ""
     return gmail_url.split(marker, 1)[1].strip()
 
+def normalize_email_text(text: str) -> str:
+    if not text:
+        return ""
+    text = html.unescape(text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[\u00ad\u200b-\u200f\u2060\ufeff]", "", text)
+    text = re.sub(r"[ \t\u2000-\u200a\u202f\u205f\u3000]+", " ", text)
+    text = re.sub(r"(?:[ℏ¬]+\s*){8,}", " ", text)
+    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text)
+    lines = []
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        visible = re.sub(r"[^A-Za-z0-9]+", "", line)
+        if not visible and len(line) >= 8:
+            continue
+        lines.append(line)
+    cleaned = "\n".join(lines).strip()
+    return cleaned
+
 def _should_skip_email(
         subject: str,
         sender: str,
@@ -289,10 +313,10 @@ def _parse_message(msg: dict) -> Newsletter | None:
 
     return Newsletter(
         id=msg["id"],
-        subject=subject,
+        subject=normalize_email_text(subject),
         sender=sender,
         date=date,
-        body=body,
+        body=normalize_email_text(body),
         snippet=snippet,
         links=links,
     )
