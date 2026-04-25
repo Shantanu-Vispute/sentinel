@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import pathlib
 import re
@@ -521,17 +522,19 @@ def digest_list():
             ORDER BY last_updated DESC
             LIMIT 2000"""
     ).fetchall()
-    sender_rows = conn.execute(
-        "SELECT story_id, sender FROM mentions").fetchall()
+    mention_rows = conn.execute(
+        "SELECT story_id, sender, COALESCE(source_type, 'email') AS source_type FROM mentions"
+    ).fetchall()
     external_stories = _load_external_stories(conn)
     conn.close()
 
     senders_by_story: dict[str, list[str]] = {}
-    for row in sender_rows:
-        senders_by_story.setdefault(
-            row["story_id"],
-            []).append(
-            row["sender"] or "")
+    mention_sources_by_story: dict[str, list[str]] = {}
+    for row in mention_rows:
+        senders_by_story.setdefault(row["story_id"], []).append(row["sender"] or "")
+        mention_sources_by_story.setdefault(
+            row["story_id"], []
+        ).append((row["source_type"] or "email").strip().lower())
 
     now_t = int(time.time())
     q = (request.args.get("q") or "").strip()
@@ -574,6 +577,12 @@ def digest_list():
                 seen_senders.add(key.lower())
                 unique_senders.append(key)
         story["senders"] = unique_senders
+        story["distinct_sender_count"] = len(unique_senders)
+        raw_source_types = mention_sources_by_story.get(row["id"], [])
+        if raw_source_types:
+            story["distinct_source_types"] = sorted(set(raw_source_types))
+        else:
+            story["distinct_source_types"] = [story["source_type"]]
 
         if not story["skipped"]:
             source_count_map[story["source_type"]] = source_count_map.get(
@@ -588,6 +597,8 @@ def digest_list():
             source_count_map[source_type] = source_count_map.get(
                 source_type, 0) + 1
         story["source_label"] = _source_label(story["source_type"])
+        story["distinct_sender_count"] = len(story.get("senders", []))
+        story["distinct_source_types"] = [story["source_type"]]
         all_stories.append(story)
 
     source_counts = [
@@ -633,9 +644,30 @@ def digest_list():
         stories = [story for story in stories if story["skipped"]]
 
     def _score(story: dict) -> float:
-        hours = ((story.get("age_days") or 0) * 24) + 1
-        return story["mention_count"] * 3.0 + \
-            story["new_info_count"] * 5.0 + 1.0 / hours
+        last_updated = story.get("last_updated") or ""
+        last_ts = _parse_iso_ts(last_updated)
+        age_hours = max((now_t - last_ts) / 3600, 0.0) if last_ts else 9999.0
+        freshness = max(0.2, math.exp(-age_hours / 36.0))
+        mention_count = max(int(story.get("mention_count") or 0), 1)
+        new_info_count = max(int(story.get("new_info_count") or 0), 0)
+        distinct_sender_count = max(int(story.get("distinct_sender_count") or 0), 1)
+        distinct_source_type_count = max(
+            len(story.get("distinct_source_types") or []),
+            1,
+        )
+        repeated_same_sender = max(mention_count - distinct_sender_count, 0)
+        mention_strength = math.log1p(mention_count) * 2.6
+        sender_bonus = math.log1p(distinct_sender_count) * 1.2
+        cross_source_bonus = (distinct_source_type_count - 1) * 2.4
+        evolution_bonus = new_info_count * 1.8
+        image_bonus = 0.35 if story.get("primary_image_url") else 0.0
+        link_bonus = 0.3 if story.get("primary_url") else 0.0
+        repetition_penalty = repeated_same_sender * 0.55
+        return (
+            (mention_strength + sender_bonus + cross_source_bonus + evolution_bonus + image_bonus + link_bonus)
+            * freshness
+            - repetition_penalty
+        )
 
     if sort == "score":
         stories.sort(
