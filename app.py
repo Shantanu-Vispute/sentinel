@@ -6,7 +6,8 @@ import re
 import sqlite3
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import humanize
 from flask import Flask, jsonify, redirect, render_template, request
@@ -18,6 +19,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 STORIES_DB_PATH = pathlib.Path(STORIES_DB)
 SCRIPTS_DIR = HERE / "scripts"
 STATE_DIR = HERE / "state"
+APP_TIMEZONE = ZoneInfo(os.environ.get("APP_TIMEZONE", "Asia/Kolkata"))
 SYNC_TARGETS = {
     "all": [
         ("email", "Email", SCRIPTS_DIR / "run-email.sh"),
@@ -77,23 +79,42 @@ def _parse_links_json(raw: str) -> list[dict]:
         return []
 
 def _parse_iso_ts(s: str) -> int:
+    dt = _parse_iso_dt(s)
+    if dt is None:
+        return 0
+    return int(dt.timestamp())
+
+def _parse_iso_dt(s: str) -> datetime | None:
     if not s:
-        return 0
+        return None
     try:
-        return int(
-            datetime.fromisoformat(
-                s.replace(
-                    "Z",
-                    "+00:00")).timestamp())
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except Exception:
-        return 0
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc)
+
+    now_utc = datetime.now(timezone.utc)
+    candidates = [
+        dt.replace(tzinfo=timezone.utc),
+        dt.replace(tzinfo=APP_TIMEZONE).astimezone(timezone.utc),
+    ]
+    nonfuture = [
+        candidate for candidate in candidates
+        if candidate <= now_utc + timedelta(minutes=5)
+    ]
+    pool = nonfuture or candidates
+    return min(
+        pool,
+        key=lambda candidate: abs((now_utc - candidate).total_seconds()),
+    )
 
 def _relative_time_label(s: str) -> str:
-    ts = _parse_iso_ts(s)
-    if not ts:
+    dt = _parse_iso_dt(s)
+    if dt is None:
         return ""
     try:
-        return humanize.naturaltime(datetime.now() - datetime.fromtimestamp(ts))
+        return humanize.naturaltime(datetime.now(timezone.utc) - dt)
     except Exception:
         return ""
 
@@ -110,7 +131,7 @@ def _iso_from_ts(ts: int | None) -> str:
     if not ts:
         return ""
     try:
-        return datetime.fromtimestamp(int(ts)).isoformat()
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).astimezone(APP_TIMEZONE).isoformat()
     except Exception:
         return ""
 
