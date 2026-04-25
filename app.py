@@ -3,14 +3,32 @@ import os
 import pathlib
 import re
 import sqlite3
+import subprocess
 import time
 from datetime import datetime
 
 from flask import Flask, jsonify, redirect, render_template, request
 from config import STORIES_DB
+from digest.gmail_auth import get_gmail_service
+from digest.gmail_fetcher import fetch_newsletter_by_id, message_id_from_gmail_url
 
 HERE = pathlib.Path(__file__).resolve().parent
 STORIES_DB_PATH = pathlib.Path(STORIES_DB)
+SCRIPTS_DIR = HERE / "scripts"
+STATE_DIR = HERE / "state"
+SYNC_TARGETS = {
+    "all": [
+        ("email", "Email", SCRIPTS_DIR / "run-email.sh"),
+        ("telegram", "Telegram", SCRIPTS_DIR / "run-telegram.sh"),
+        ("social", "Social", SCRIPTS_DIR / "run-social.sh"),
+        ("youtube", "YouTube", SCRIPTS_DIR / "run-youtube.sh"),
+    ],
+    "email": [("email", "Email", SCRIPTS_DIR / "run-email.sh")],
+    "telegram": [("telegram", "Telegram", SCRIPTS_DIR / "run-telegram.sh")],
+    "twitter": [("social", "Social", SCRIPTS_DIR / "run-social.sh")],
+    "linkedin": [("social", "Social", SCRIPTS_DIR / "run-social.sh")],
+    "youtube": [("youtube", "YouTube", SCRIPTS_DIR / "run-youtube.sh")],
+}
 STORY_DETAIL_COLUMNS = """id, title, summary, first_seen, last_updated,
 mention_count, new_info_count, is_read, primary_url, primary_url_host,
 COALESCE(skipped, 0) AS skipped,
@@ -91,6 +109,68 @@ def _has_table(conn: sqlite3.Connection, name: str) -> bool:
         (name,),
     ).fetchone()
     return row is not None
+
+def _mentions_columns(conn: sqlite3.Connection) -> set[str]:
+    return {row[1] for row in conn.execute("PRAGMA table_info(mentions)")}
+
+def _ensure_mentions_raw_columns(conn: sqlite3.Connection) -> set[str]:
+    cols = _mentions_columns(conn)
+    if "raw_title" not in cols:
+        conn.execute("ALTER TABLE mentions ADD COLUMN raw_title TEXT")
+    if "raw_body" not in cols:
+        conn.execute("ALTER TABLE mentions ADD COLUMN raw_body TEXT")
+    if cols != _mentions_columns(conn):
+        conn.commit()
+    return _mentions_columns(conn)
+
+def _renderable_mention(mention: dict) -> dict:
+    rendered = dict(mention)
+    if (rendered.get("source_type") or "email") == "email":
+        rendered["title"] = rendered.get("raw_title") or rendered.get("title") or ""
+        rendered["summary"] = rendered.get("raw_body") or rendered.get("summary") or ""
+    return rendered
+
+def _hydrate_email_mentions(conn: sqlite3.Connection, mentions: list[dict]) -> list[dict]:
+    cols = _ensure_mentions_raw_columns(conn)
+    can_store = "raw_title" in cols and "raw_body" in cols and "id" in cols
+    pending = [
+        mention for mention in mentions
+        if (mention.get("source_type") or "email") == "email"
+        and mention.get("gmail_url")
+        and (not mention.get("raw_title") or not mention.get("raw_body"))
+    ]
+    if not pending:
+        return [_renderable_mention(mention) for mention in mentions]
+    try:
+        service = get_gmail_service()
+    except Exception:
+        return [_renderable_mention(mention) for mention in mentions]
+
+    fetched = {}
+    dirty = False
+    for mention in pending:
+        message_id = message_id_from_gmail_url(mention.get("gmail_url") or "")
+        if not message_id:
+            continue
+        if message_id not in fetched:
+            try:
+                fetched[message_id] = fetch_newsletter_by_id(service, message_id)
+            except Exception:
+                fetched[message_id] = None
+        newsletter = fetched[message_id]
+        if newsletter is None:
+            continue
+        mention["raw_title"] = newsletter.subject
+        mention["raw_body"] = newsletter.body
+        if can_store:
+            conn.execute(
+                "UPDATE mentions SET raw_title=?, raw_body=? WHERE id=?",
+                (newsletter.subject, newsletter.body, mention["id"]),
+            )
+            dirty = True
+    if dirty:
+        conn.commit()
+    return [_renderable_mention(mention) for mention in mentions]
 
 def _ensure_external_state_table(conn: sqlite3.Connection) -> None:
     conn.execute(
@@ -308,6 +388,98 @@ def _source_label(source_type: str) -> str:
     }
     return labels.get(source_type, source_type.replace("_", " ").title())
 
+
+def _sync_button_label(source: str) -> str:
+    if not source or source == "all":
+        return "Sync all"
+    return f"Sync {_source_label(source)}"
+
+
+def _list_running_commands() -> list[str]:
+    try:
+        proc = subprocess.run(
+            ["ps", "-eo", "pid=,args="],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _script_running(script_path: pathlib.Path) -> bool:
+    target = str(script_path)
+    for line in _list_running_commands():
+        if target in line and "python" not in line[:12]:
+            return True
+    return False
+
+
+def _launch_sync_script(script_path: pathlib.Path) -> tuple[bool, str]:
+    if not script_path.exists():
+        return False, "missing"
+    if _script_running(script_path):
+        return False, "already_running"
+    try:
+        subprocess.Popen(
+            [str(script_path)],
+            cwd=str(HERE),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return True, "started"
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _read_sync_status(job: str, label: str) -> dict:
+    path = STATE_DIR / f"sync_status_{job}.json"
+    data = {
+        "job": job,
+        "label": label,
+        "status": "idle",
+        "ok": False,
+        "message": "",
+        "started_at": "",
+        "finished_at": "",
+        "updated_at": "",
+        "log_path": "",
+    }
+    if not path.exists():
+        return data
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        data["status"] = "unknown"
+        data["message"] = "Status file unreadable"
+        return data
+    data.update({
+        "status": payload.get("status", "idle"),
+        "ok": bool(payload.get("ok", False)),
+        "message": payload.get("message", ""),
+        "started_at": payload.get("started_at", ""),
+        "finished_at": payload.get("finished_at", ""),
+        "updated_at": payload.get("updated_at", ""),
+        "log_path": payload.get("log_path", ""),
+    })
+    return data
+
+
+def _all_sync_statuses() -> list[dict]:
+    seen = set()
+    statuses = []
+    for targets in SYNC_TARGETS.values():
+        for key, label, _ in targets:
+            if key in seen:
+                continue
+            seen.add(key)
+            statuses.append(_read_sync_status(key, label))
+    order = {"email": 0, "telegram": 1, "social": 2, "youtube": 3}
+    statuses.sort(key=lambda item: order.get(item["job"], 99))
+    return statuses
+
 @app.route("/")
 def index():
     return redirect("/digest")
@@ -327,6 +499,8 @@ def digest_list():
             sort="recent",
             state="",
             source="all",
+            sync_label=_sync_button_label("all"),
+            sync_statuses=_all_sync_statuses(),
         )
 
     rows = conn.execute(
@@ -496,6 +670,8 @@ def digest_list():
         sort=sort,
         state=state,
         source=source,
+        sync_label=_sync_button_label(source),
+        sync_statuses=_all_sync_statuses(),
     )
 
 @app.route("/api/digest/skip", methods=["POST"])
@@ -516,9 +692,48 @@ def api_digest_skip():
         _mark_external_state(story_id, skipped=value)
     return jsonify({"id": story_id, "skipped": value})
 
+
+@app.route("/api/digest/sync", methods=["POST"])
+def api_digest_sync():
+    data = request.get_json(silent=True) or {}
+    source = (data.get("source") or "all").strip().lower()
+    targets = SYNC_TARGETS.get(source)
+    if not targets:
+        return jsonify({"error": "unsupported source"}), 400
+
+    started = []
+    skipped = []
+    failed = []
+    seen = set()
+
+    for key, label, script_path in targets:
+        if key in seen:
+            continue
+        seen.add(key)
+        ok, status = _launch_sync_script(script_path)
+        item = {"key": key, "label": label, "status": status}
+        if ok:
+            started.append(item)
+        elif status == "already_running":
+            skipped.append(item)
+        else:
+            failed.append(item)
+
+    return jsonify({
+        "source": source,
+        "started": started,
+        "skipped": skipped,
+        "failed": failed,
+    })
+
+
+@app.route("/api/digest/sync-status")
+def api_digest_sync_status():
+    return jsonify({"jobs": _all_sync_statuses()})
+
 @app.route("/api/digest/story/<story_id>")
 def api_digest_story(story_id: str):
-    conn = _stories_conn()
+    conn = _stories_conn(readonly=False)
     if conn is None:
         return jsonify({"error": "no stories db"}), 404
     row = conn.execute(
@@ -551,6 +766,7 @@ def api_digest_story(story_id: str):
             (story_id,),
         ).fetchall()
     ]
+    mentions = _hydrate_email_mentions(conn, mentions)
     timeline = [
         dict(entry)
         for entry in conn.execute(
@@ -606,7 +822,7 @@ def digest_search_index():
 
 @app.route("/digest/<story_id>")
 def digest_story(story_id: str):
-    conn = _stories_conn()
+    conn = _stories_conn(readonly=False)
     if conn is None:
         return redirect("/digest")
     row = conn.execute(
@@ -637,6 +853,7 @@ def digest_story(story_id: str):
         "SELECT * FROM mentions WHERE story_id=? ORDER BY date DESC",
         (story_id,),
     ).fetchall()
+    mention_dicts = _hydrate_email_mentions(conn, [dict(mention) for mention in mentions])
     timeline = conn.execute(
         "SELECT * FROM timeline_entries WHERE story_id=? ORDER BY date DESC",
         (story_id,),
@@ -645,7 +862,7 @@ def digest_story(story_id: str):
     return render_template(
         "digest_story.html",
         story=story,
-        mentions=[dict(mention) for mention in mentions],
+        mentions=mention_dicts,
         timeline=[dict(entry) for entry in timeline],
     )
 

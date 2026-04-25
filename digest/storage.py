@@ -43,6 +43,8 @@ class StoryDB:
                 story_id       TEXT NOT NULL,
                 title          TEXT,
                 summary        TEXT,
+                raw_title      TEXT,
+                raw_body       TEXT,
                 sender         TEXT NOT NULL,
                 gmail_url      TEXT NOT NULL,
                 date           TEXT NOT NULL,
@@ -101,6 +103,10 @@ class StoryDB:
         if "source_type" not in mcols:
             self.conn.execute(
                 "ALTER TABLE mentions ADD COLUMN source_type TEXT DEFAULT 'email'")
+        if "raw_title" not in mcols:
+            self.conn.execute("ALTER TABLE mentions ADD COLUMN raw_title TEXT")
+        if "raw_body" not in mcols:
+            self.conn.execute("ALTER TABLE mentions ADD COLUMN raw_body TEXT")
         self.conn.commit()
 
     def find_similar(
@@ -135,6 +141,8 @@ class StoryDB:
         date: str,
         mention_title: str = "",
         mention_summary: str = "",
+        mention_raw_title: str = "",
+        mention_raw_body: str = "",
         category: str = "other",
         primary_url: str = "",
         source_type: str = "email",
@@ -169,9 +177,11 @@ class StoryDB:
         )
         self.conn.execute(
             """INSERT INTO mentions
-               (story_id, title, summary, sender, gmail_url, date, created_at, source_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (story_id, title, summary, raw_title, raw_body, sender, gmail_url, date, created_at, source_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (story_id, mention_title or title, mention_summary or summary,
+             mention_raw_title or mention_title or title,
+             mention_raw_body or mention_summary or summary,
              sender, gmail_url, date, now, source_type),
         )
         self.conn.commit()
@@ -194,13 +204,15 @@ class StoryDB:
         date: str,
         added_new_info: bool = False,
         source_type: str = "email",
+        raw_title: str = "",
+        raw_body: str = "",
     ):
         now = datetime.now().isoformat()
         self.conn.execute(
             """INSERT INTO mentions
-               (story_id, title, summary, sender, gmail_url, date, created_at, added_new_info, source_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (story_id, title, summary, sender, gmail_url, date, now, int(added_new_info), source_type),
+               (story_id, title, summary, raw_title, raw_body, sender, gmail_url, date, created_at, added_new_info, source_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (story_id, title, summary, raw_title or title, raw_body or summary, sender, gmail_url, date, now, int(added_new_info), source_type),
         )
         self.conn.execute(
             "UPDATE stories SET mention_count = mention_count + 1, last_updated = ? WHERE id = ?",

@@ -98,6 +98,7 @@ class Story:
     summary: str
     primary_url: str = ""
     source_newsletter: str = ""
+    source_email_body: str = ""
     source_sender: str = ""
     source_gmail_url: str = ""
     date: str = ""
@@ -262,6 +263,7 @@ def _parse_response(result: dict, newsletter: Newsletter) -> list[Story]:
                 title=title,
                 summary=summary,
                 source_newsletter=newsletter.subject,
+                source_email_body=newsletter.body,
                 source_sender=_extract_sender_name(newsletter.sender),
                 source_gmail_url=newsletter.gmail_url,
                 date=newsletter.date,

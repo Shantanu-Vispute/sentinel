@@ -131,6 +131,25 @@ def fetch_newsletters(
 
     return newsletters
 
+def fetch_newsletter_by_id(service, message_id: str) -> Newsletter | None:
+    if not message_id:
+        return None
+    msg = (
+        service.users()
+        .messages()
+        .get(userId="me", id=message_id, format="full")
+        .execute()
+    )
+    return _parse_message(msg)
+
+def message_id_from_gmail_url(gmail_url: str) -> str:
+    if not gmail_url:
+        return ""
+    marker = "#inbox/"
+    if marker not in gmail_url:
+        return ""
+    return gmail_url.split(marker, 1)[1].strip()
+
 def _should_skip_email(
         subject: str,
         sender: str,

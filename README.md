@@ -161,6 +161,8 @@ Open:
 http://127.0.0.1:5000/digest
 ```
 
+The digest toolbar also includes a manual sync button. It can trigger `all`, or the current filtered source, and the dashboard shows live sync status for `email`, `telegram`, `social`, and `youtube`.
+
 Useful filters:
 
 ```text
@@ -201,6 +203,15 @@ state/daemon.log
 state/telegram.log
 state/social.log
 state/youtube.log
+```
+
+Live sync state is also written to:
+
+```text
+state/sync_status_email.json
+state/sync_status_telegram.json
+state/sync_status_social.json
+state/sync_status_youtube.json
 ```
 
 ## Common Commands
