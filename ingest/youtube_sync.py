@@ -205,6 +205,13 @@ def upsert(videos: list[dict]) -> int:
              excerpt=excluded.excerpt,
              cover=excluded.cover,
              author=excluded.author,
+             created_ts=CASE
+               WHEN external_bookmarks.created_ts IS NULL
+                 OR external_bookmarks.created_ts = 0
+                 OR external_bookmarks.created_ts = external_bookmarks.scraped_at
+               THEN external_bookmarks.scraped_at - MAX(COALESCE(excluded.source_rank, 1) - 1, 0)
+               ELSE external_bookmarks.created_ts
+             END,
              tags=excluded.tags,
              source_rank=excluded.source_rank,
              last_seen_at=excluded.last_seen_at""",

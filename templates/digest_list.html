@@ -116,7 +116,7 @@ body {
 .story-title-link:hover .story-title { color: var(--accent); }
 html[data-theme="dark"] .story-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
 .story-card.unread { border-left: 3px solid var(--accent); }
-.skip-btn {
+.read-btn {
   position: absolute; top: 10px; right: 10px;
   width: 26px; height: 26px; border-radius: 50%;
   background: transparent; border: 0; color: var(--text-subtle);
@@ -124,8 +124,8 @@ html[data-theme="dark"] .story-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.
   display: flex; align-items: center; justify-content: center;
   opacity: 0; transition: opacity 100ms, color 100ms, background 100ms;
 }
-.story-card:hover .skip-btn { opacity: 1; }
-.skip-btn:hover { color: #d95150; background: rgba(217, 81, 80, 0.1); }
+.story-card:hover .read-btn { opacity: 1; }
+.read-btn:hover { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
 .story-title {
   font-size: 17px; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em;
@@ -556,7 +556,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
           {% set tg_card = s.source_type == 'telegram' %}
           <div class="story-card {% if not s.is_read %}unread{% endif %} has-image" data-story-id="{{ s.id }}" role="button" tabindex="0">
             <span class="source-chip">{{ s.source_label or s.source_type }}</span>
-            <button class="skip-btn" data-skip title="Not interested — hide this story">✕</button>
+            <button class="read-btn" data-read title="Mark as read">✕</button>
             {% if s.primary_image_url %}
               <img class="card-thumb" src="{{ s.primary_image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
             {% else %}
@@ -726,10 +726,10 @@ document.getElementById("themeToggle").addEventListener("click", function () {
     history.pushState({}, "", qs ? "?" + qs : window.location.pathname);
   }
 
-  // card-level click handler — whole card opens modal, except when clicking a real link inside or the skip ✕
+  // card-level click handler — whole card opens modal, except when clicking a real link inside or the read ✕
   document.querySelectorAll(".story-card").forEach(function (card) {
     function activate(e) {
-      if (e.target.closest("a") || e.target.closest(".skip-btn")) return;
+      if (e.target.closest("a") || e.target.closest(".read-btn")) return;
       e.preventDefault();
       var id = card.getAttribute("data-story-id");
       if (id) { open(id); card.classList.remove("unread"); }
@@ -740,9 +740,9 @@ document.getElementById("themeToggle").addEventListener("click", function () {
     });
   });
 
-  // ✕ not-interested button — registered in capture phase so it runs BEFORE the
+  // ✕ mark-read button — registered in capture phase so it runs BEFORE the
   // card's click handler can bubble up and open the modal.
-  document.querySelectorAll(".skip-btn").forEach(function (btn) {
+  document.querySelectorAll(".read-btn").forEach(function (btn) {
     btn.addEventListener("click", function (e) {
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -750,15 +750,19 @@ document.getElementById("themeToggle").addEventListener("click", function () {
       var card = btn.closest(".story-card");
       var id = card && card.getAttribute("data-story-id");
       if (!id) return;
-      fetch("/api/digest/skip", {
+      fetch("/api/digest/read", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: id, value: 1 })
       }).then(function () {
-        card.style.transition = "opacity 180ms, transform 180ms";
-        card.style.opacity = "0";
-        card.style.transform = "scale(0.95)";
-        setTimeout(function () { card.remove(); }, 200);
+        card.classList.remove("unread");
+        var state = new URLSearchParams(window.location.search).get("state");
+        if (state === "unread") {
+          card.style.transition = "opacity 180ms, transform 180ms";
+          card.style.opacity = "0";
+          card.style.transform = "scale(0.95)";
+          setTimeout(function () { card.remove(); }, 200);
+        }
       });
     }, true);
     btn.addEventListener("mousedown", function (e) { e.stopPropagation(); }, true);
