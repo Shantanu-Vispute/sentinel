@@ -15,26 +15,46 @@ pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-Install and start Ollama, then pull the configured models:
-
-```bash
-ollama serve
-ollama pull gemma4:e2b
-ollama pull qwen3-embedding:0.6b
-```
-
 Create local config:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` for your machine. The common fields are:
+Gemini is the default backend. Add your Gemini API key to `.env`:
 
 ```bash
+LLM_PROVIDER=gemini
+EMBEDDING_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+```
+
+Sentinel will try Gemini chat models in this order and only rotate on rate-limit or quota errors:
+
+```text
+gemini-3.1-flash-lite-preview
+gemini-2.5-flash-lite
+gemini-2.5-flash
+gemini-3-flash-preview
+```
+
+If you want a fully local setup, switch both providers to Ollama and start the Ollama models:
+
+```bash
+LLM_PROVIDER=ollama
+EMBEDDING_PROVIDER=ollama
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=gemma4:e2b
 EMBEDDING_MODEL=qwen3-embedding:0.6b
+ollama serve
+ollama pull gemma4:e2b
+ollama pull qwen3-embedding:0.6b
+```
+
+Other common `.env` fields:
+
+```bash
 TELEGRAM_CHANNELS=channel_one,channel_two
 GMAIL_CREDENTIALS_PATH=state/credentials.json
 GMAIL_TOKEN_PATH=state/token.json

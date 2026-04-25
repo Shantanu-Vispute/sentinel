@@ -46,6 +46,12 @@ def _path_env(name: str, default: Path) -> str:
 
 _load_env_file()
 
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+EMBEDDING_PROVIDER = os.getenv(
+    "EMBEDDING_PROVIDER", "gemini").strip().lower()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_EMBEDDING_MODEL = os.getenv(
+    "GEMINI_EMBEDDING_MODEL", "gemini-embedding-001").strip()
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "qwen3-embedding:0.6b")
