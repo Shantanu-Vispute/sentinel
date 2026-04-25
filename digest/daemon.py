@@ -1,5 +1,5 @@
 from digest.gmail_auth import get_gmail_service
-from config import SIMILARITY_THRESHOLD, MAX_FETCH_RESULTS, OLLAMA_HOST
+from config import MAX_FETCH_RESULTS, SIMILARITY_THRESHOLD
 import digest.llm_client as llm_client
 from digest.storage import StoryDB
 from digest.story_extractor import extract_stories
@@ -93,12 +93,18 @@ def _check_new_info(existing_summary: str, new_title: str, new_summary: str) -> 
         print(f"        WARN: new-info check failed: {e}")
         return False, "", ""
 
-def _check_ollama() -> bool:
-    try:
-        llm_client.get_llm_client().ollama_client.list()
-        return True
-    except Exception:
-        return False
+def _check_backends() -> bool:
+    checks = llm_client.get_llm_client().healthcheck()
+    ok = True
+    for check in checks:
+        if check.ok:
+            detail = f" ({check.detail})" if check.detail else ""
+            print(f"      OK: {check.label}{detail}")
+            continue
+        ok = False
+        detail = f" ({check.detail})" if check.detail else ""
+        print(f"      ERROR: {check.label}{detail}")
+    return ok
 
 def _persist_story(
         db,
@@ -188,10 +194,8 @@ def process_new_emails(max_results: int = 50, since: datetime | None = None):
 
     llm_client.get_llm_client()
 
-    print(f"\n[0/3] Checking Ollama @ {OLLAMA_HOST}...")
-    if not _check_ollama():
-        print(f"      ERROR: Ollama is not reachable.")
-        print(f"      Start it with: ollama serve")
+    print("\n[0/3] Checking configured model backends...")
+    if not _check_backends():
         print(f"      Aborting — no emails fetched, no LLM calls made.")
         return
 
