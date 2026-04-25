@@ -8,6 +8,7 @@ import subprocess
 import time
 from datetime import datetime
 
+import humanize
 from flask import Flask, jsonify, redirect, render_template, request
 from config import STORIES_DB
 from digest.gmail_auth import get_gmail_service
@@ -86,6 +87,15 @@ def _parse_iso_ts(s: str) -> int:
                     "+00:00")).timestamp())
     except Exception:
         return 0
+
+def _relative_time_label(s: str) -> str:
+    ts = _parse_iso_ts(s)
+    if not ts:
+        return ""
+    try:
+        return humanize.naturaltime(datetime.now() - datetime.fromtimestamp(ts))
+    except Exception:
+        return ""
 
 def _host_of(url: str) -> str:
     try:
@@ -560,6 +570,8 @@ def digest_list():
             "is_read": bool(row["is_read"]),
             "last_updated": row["last_updated"],
             "first_seen": row["first_seen"],
+            "last_updated_relative": _relative_time_label(row["last_updated"] or ""),
+            "first_seen_relative": _relative_time_label(row["first_seen"] or ""),
             "age_days": age_days,
             "skipped": bool(row["skipped"]),
             "source_type": row["source_type"] or "email",
@@ -592,6 +604,8 @@ def digest_list():
     for story in external_stories:
         ts = _parse_iso_ts(story["last_updated"])
         story["age_days"] = (now_t - ts) // 86400 if ts else None
+        story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
+        story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
         if not story["skipped"]:
             source_type = story["source_type"]
             source_count_map[source_type] = source_count_map.get(
@@ -793,10 +807,15 @@ def api_digest_story(story_id: str):
             "sender": story.get("author") or story["source_type"],
             "gmail_url": story["primary_url"],
             "date": story["first_seen"] or story["last_updated"],
+            "date_relative": _relative_time_label(story["first_seen"] or story["last_updated"] or ""),
         }
+        story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
+        story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
         return jsonify({"story": story, "mentions": [mention], "timeline": []})
     story = dict(row)
     story["links"] = _parse_links_json(story.get("links_json") or "")
+    story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
+    story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
     mentions = [
         dict(mention)
         for mention in conn.execute(
@@ -805,6 +824,8 @@ def api_digest_story(story_id: str):
         ).fetchall()
     ]
     mentions = _hydrate_email_mentions(conn, mentions)
+    for mention in mentions:
+        mention["date_relative"] = _relative_time_label(mention.get("date") or "")
     timeline = [
         dict(entry)
         for entry in conn.execute(
@@ -812,6 +833,8 @@ def api_digest_story(story_id: str):
             (story_id,),
         ).fetchall()
     ]
+    for entry in timeline:
+        entry["date_relative"] = _relative_time_label(entry.get("date") or "")
     conn.close()
 
     if not story.get("is_read"):
@@ -879,7 +902,10 @@ def digest_story(story_id: str):
             "sender": story.get("author") or story["source_type"],
             "gmail_url": story["primary_url"],
             "date": story["first_seen"] or story["last_updated"],
+            "date_relative": _relative_time_label(story["first_seen"] or story["last_updated"] or ""),
         }
+        story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
+        story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
         return render_template(
             "digest_story.html",
             story=story,
@@ -887,11 +913,15 @@ def digest_story(story_id: str):
             timeline=[],
         )
     story = dict(row)
+    story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
+    story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
     mentions = conn.execute(
         "SELECT * FROM mentions WHERE story_id=? ORDER BY date DESC",
         (story_id,),
     ).fetchall()
     mention_dicts = _hydrate_email_mentions(conn, [dict(mention) for mention in mentions])
+    for mention in mention_dicts:
+        mention["date_relative"] = _relative_time_label(mention.get("date") or "")
     timeline = conn.execute(
         "SELECT * FROM timeline_entries WHERE story_id=? ORDER BY date DESC",
         (story_id,),
@@ -901,7 +931,10 @@ def digest_story(story_id: str):
         "digest_story.html",
         story=story,
         mentions=mention_dicts,
-        timeline=[dict(entry) for entry in timeline],
+        timeline=[
+            {**dict(entry), "date_relative": _relative_time_label(dict(entry).get("date") or "")}
+            for entry in timeline
+        ],
     )
 
 if __name__ == "__main__":
