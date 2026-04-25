@@ -203,6 +203,7 @@ def _external_row_to_story(row: sqlite3.Row) -> dict:
     source = row["source"] or "external"
     created_ts = row["created_ts"] or row["last_seen_at"] or row["scraped_at"] or 0
     updated_ts = row["last_seen_at"] or row["scraped_at"] or created_ts
+    source_rank = row["source_rank"] if "source_rank" in row.keys() else None
     primary_url = row["url"] or ""
     author = row["author"] or ""
     links = []
@@ -235,6 +236,8 @@ def _external_row_to_story(row: sqlite3.Row) -> dict:
         "links": links,
         "senders": [author] if author else [source],
         "author": author,
+        "source_rank": int(source_rank or 0),
+        "sort_ts": updated_ts,
     }
 
 def _load_external_stories(conn: sqlite3.Connection) -> list[dict]:
@@ -579,6 +582,8 @@ def digest_list():
             "primary_image_url": row["primary_image_url"] or "",
             "links": _parse_links_json(row["links_json"]),
             "senders": [],
+            "source_rank": 0,
+            "sort_ts": ts,
         }
 
         seen_senders = set()
@@ -683,30 +688,44 @@ def digest_list():
             - repetition_penalty
         )
 
+    def _sort_rank(story: dict) -> int:
+        rank = int(story.get("source_rank") or 0)
+        return -rank if rank else 0
+
     if sort == "score":
         stories.sort(
             key=lambda story: (
                 _score(story),
+                story.get("sort_ts") or 0,
+                _sort_rank(story),
                 story["last_updated"] or ""),
             reverse=True)
     elif sort == "mentions":
         stories.sort(
             key=lambda story: (
                 story["mention_count"],
+                story.get("sort_ts") or 0,
+                _sort_rank(story),
                 story["last_updated"] or ""),
             reverse=True)
     elif sort == "evolved":
         stories.sort(
             key=lambda story: (
                 story["new_info_count"],
+                story.get("sort_ts") or 0,
+                _sort_rank(story),
                 story["last_updated"] or ""),
             reverse=True)
     elif sort == "oldest":
-        stories.sort(key=lambda story: story["last_updated"] or "")
+        stories.sort(key=lambda story: (story.get("sort_ts") or 0, -_sort_rank(story), story["last_updated"] or ""))
     else:
         sort = "recent"
         stories.sort(
-            key=lambda story: story["last_updated"] or "",
+            key=lambda story: (
+                story.get("sort_ts") or 0,
+                _sort_rank(story),
+                story["last_updated"] or "",
+            ),
             reverse=True)
 
     total_unskipped = sum(source_count_map.values())

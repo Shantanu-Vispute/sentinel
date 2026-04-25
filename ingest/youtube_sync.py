@@ -61,10 +61,12 @@ def ensure_schema() -> None:
         "quoted_json",
         "reply_to",
         "link_card_json",
-            "tags"):
+        "tags",
+    ):
         if col not in cols:
-            conn.execute(
-                f"ALTER TABLE external_bookmarks ADD COLUMN {col} TEXT")
+            conn.execute(f"ALTER TABLE external_bookmarks ADD COLUMN {col} TEXT")
+    if "source_rank" not in cols:
+        conn.execute("ALTER TABLE external_bookmarks ADD COLUMN source_rank INTEGER")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS external_item_state (
             id TEXT PRIMARY KEY,
@@ -165,6 +167,7 @@ def upsert(videos: list[dict]) -> int:
             "webpage_url") or f"https://www.youtube.com/watch?v={vid}"
         title = (v.get("title") or "").strip() or "(untitled)"
         uploader = (v.get("uploader") or v.get("channel") or "").strip()
+        playlist_index = int(v.get("playlist_index") or 0)
 
         thumb = ""
         thumbs = v.get("thumbnails") or []
@@ -186,7 +189,7 @@ def upsert(videos: list[dict]) -> int:
             (
                 ext_id, "youtube", url, title, excerpt, thumb, uploader, now,
                 now, now,
-                "", "[]", None, "", None, "watch later",
+                "", "[]", None, "", None, "watch later", playlist_index,
             )
         )
     conn = sqlite3.connect(DB_PATH)
@@ -194,14 +197,15 @@ def upsert(videos: list[dict]) -> int:
         """INSERT INTO external_bookmarks
                (id, source, url, title, excerpt, cover, author, created_ts,
                 scraped_at, last_seen_at,
-                avatar, media_json, quoted_json, reply_to, link_card_json, tags)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                avatar, media_json, quoted_json, reply_to, link_card_json, tags, source_rank)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(id) DO UPDATE SET
              title=excluded.title,
              excerpt=excluded.excerpt,
              cover=excluded.cover,
              author=excluded.author,
              tags=excluded.tags,
+             source_rank=excluded.source_rank,
              last_seen_at=excluded.last_seen_at""",
         rows,
     )
