@@ -574,7 +574,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
           {% set tg_card = s.source_type == 'telegram' %}
           <div class="story-card {% if not s.is_read %}unread{% endif %} has-image" data-story-id="{{ s.id }}" role="button" tabindex="0">
             <span class="source-chip">{{ s.source_label or s.source_type }}</span>
-            <button class="read-btn" data-read title="Mark as read">✕</button>
+            <button class="read-btn" data-read title="Skip">✕</button>
             {% if s.primary_image_url %}
               <img class="card-thumb" src="{{ s.primary_image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
             {% else %}
@@ -758,7 +758,7 @@ document.getElementById("themeToggle").addEventListener("click", function () {
     });
   });
 
-  // ✕ mark-read button — registered in capture phase so it runs BEFORE the
+  // ✕ skip button — registered in capture phase so it runs BEFORE the
   // card's click handler can bubble up and open the modal.
   document.querySelectorAll(".read-btn").forEach(function (btn) {
     btn.addEventListener("click", function (e) {
@@ -768,7 +768,7 @@ document.getElementById("themeToggle").addEventListener("click", function () {
       var card = btn.closest(".story-card");
       var id = card && card.getAttribute("data-story-id");
       if (!id) return;
-      fetch("/api/digest/read", {
+      fetch("/api/digest/skip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: id, value: 1 })
