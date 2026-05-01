@@ -51,6 +51,11 @@ curated_digest:
 - Include main stories, secondary headlines, "other news", tools, products, papers,
   and reports when they are external/newsworthy.
 - For headline-only items, use the headline text as the summary. Do not add details.
+- Never create one generic story for a whole section such as "Other news",
+  "Other news & articles", "Trending tools", or "Trending papers & reports".
+  Split those sections into specific item-level stories when each item has enough
+  explicit detail. If the section only lists names/links without enough substance,
+  skip the thin items.
 
 single_article:
 - One author is writing about one main theme, argument, tutorial, event, recap, or explainer.
@@ -87,7 +92,9 @@ Strict rules:
 - Do not ignore secondary news sections when the email is a curated_digest.
 - Titles must be specific story headlines from content, not meta labels.
 - Never output classification/meta titles such as:
-  "Curated digest", "Single-topic article", "Type A", "Type B", "Newsletter overview".
+  "Curated digest", "Single-topic article", "Type A", "Type B", "Newsletter overview",
+  "Other news", "Other news & articles", "Trending tools", "Trending papers & reports",
+  "AI findings and resources", "Industry news and developments".
 - Summaries must describe the story itself (2-3 sentences), not the format of the newsletter.
 - If content_type is promotional, return an empty stories array.
 """
@@ -249,6 +256,13 @@ def _parse_response(result: dict, newsletter: Newsletter) -> list[Story]:
         "type b",
         "newsletter overview",
         "newsletter summary",
+        "other news",
+        "other news & articles",
+        "trending tools",
+        "trending papers & reports",
+        "ai findings and resources",
+        "industry news and developments",
+        "new ai tools and resources",
     }
     for item in result.get("stories", []):
         title = item.get("title", "").strip()
