@@ -30,66 +30,66 @@ def _scrub_pii(text: str) -> str:
         text = pattern.sub('[REDACTED]', text)
     return text
 
-SYSTEM_PROMPT = """You are a news story extractor.
+SYSTEM_PROMPT = """You are a newsletter story extractor.
 
 Return JSON only with this schema:
-    {"stories":[{"title":"...","summary":"..."}]}
+    {"content_type":"curated_digest|single_article|promotional","stories":[{"title":"...","summary":"..."}]}
 
-CONTENT TYPE DETECTION — decide before extracting:
+Follow this order:
 
-    CURATED DIGEST: Multiple unrelated news items or events bundled together
-  (e.g., "5 things happening this week", "today's top stories", roundup newsletters).
-  → Output ONE story per independent item, including ALL sections:
-    - Main featured stories (with full body text)
-    - "Other news" / secondary headlines (headline-only entries)
-    - Tools, products, papers, and reports sections
-  → For items with only a headline and no body, use the headline text as the summary.
-    Do NOT hallucinate details — only use what is explicitly present.
+1. Classify the email.
+2. Extract stories using only the rule for that class.
 
-SINGLE ARTICLE: One author writing about ONE topic, even if it has multiple
-  sections, headings, chapters, or sub-points explaining that same topic.
-  This includes tutorials, deep-dives, opinion pieces, and explainers.
-  → Output EXACTLY ONE story covering the whole piece.
+CONTENT TYPES:
 
-KEY TEST — ask yourself: are the sections INDEPENDENT NEWS EVENTS, or SUB-POINTS of one topic?
-  INDEPENDENT events (curated digest, multiple stories):
-    "Company A raises $10B", "Company B releases a new model", "Company C lays off 100 engineers"
-    Each section links to a different external article or news source.
-  SUB-POINTS of one topic (single article, one story):
-    "Loss Functions", "Gradient Descent", "Next-Token Prediction" (all explain how LLMs learn)
-    "The Incident", "The Response", "The Aftermath" (all about the same event)
-    "Why It Matters", "How It Works", "What's Next" (all about the same subject)
-    "Data vs hype", "Building world-class orgs", "Future with Martin Fowler" (all sections
-      in one author's conference recap covering different speakers at the same event)
+curated_digest:
+- Multiple independent news items, launches, papers, tools, funding events, policy updates,
+  or links are bundled together.
+- Examples: "today's top stories", "5 things happening this week", roundup newsletters,
+  link digests, tools/papers sections about external products or projects.
+- Extract one story per independent item.
+- Include main stories, secondary headlines, "other news", tools, products, papers,
+  and reports when they are external/newsworthy.
+- For headline-only items, use the headline text as the summary. Do not add details.
 
-CONFERENCE RECAPS & EVENT SUMMARIES: When one author writes about multiple talks,
-  presentations, or discussions they attended or organized (e.g., summit notes, workshop
-  recap, event writeup), this is ALWAYS one story — even with numbered sections per speaker.
+single_article:
+- One author is writing about one main theme, argument, tutorial, event, recap, or explainer.
+- It is still one story even when it has sections, numbered points, speaker summaries,
+  chapters, sub-topics, or headings.
+- Examples: tutorials, deep-dives, opinion pieces, explainers, conference recaps,
+  event summaries, workshop notes, one essay covering multiple speakers at the same event.
+- Extract exactly one story covering the whole piece.
 
-CRITICAL RULE: Section headings or H2/H3 headers within a single article do NOT make it
-a curated digest. A tutorial with 5 chapters is still ONE story. A conference recap with
-3 numbered sessions is still ONE story.
+promotional:
+- The email is mostly transactional, promotional, account-related, a sponsor block,
+  a course catalog, a resource directory for the newsletter's own products, an ad,
+  or a discount/last-chance CTA.
+- Extract no stories.
 
-NEVER extract these as stories (return no story for them):
-    - Sponsor blocks, paid promotions, or "brought to you by" sections
-- Self-promotional sections advertising the newsletter's own courses, products, or services
-- "Advertise with us" / "reach N,000 readers" sections
-- Account summaries, balance notifications, financial transaction emails
-- Course listings or resource directories that are clearly the newsletter's own offerings
-- Countdown offers, "last chance" reminders, or discount CTAs
+DECISION TEST:
+- If sections are independent events or external links that could stand alone as separate
+  news cards, use curated_digest.
+- If sections are sub-points supporting one article, one authorial argument, or one event
+  recap, use single_article.
+- Section headings alone never make an email a curated digest.
 
-"Tools sections" means independent external tools/products covered as news — NOT the newsletter's own course catalog or sponsor placements.
+NEVER extract these as stories:
+- Sponsor blocks, paid promotions, or "brought to you by" sections.
+- Self-promotional sections advertising the newsletter's own courses, products, or services.
+- "Advertise with us" / "reach N,000 readers" sections.
+- Account summaries, balance notifications, financial transaction emails.
+- Course listings or resource directories that are clearly the newsletter's own offerings.
+- Countdown offers, "last chance" reminders, or discount CTAs.
 
 Strict rules:
-    - Use only facts explicitly present in the provided content.
+- Use only facts explicitly present in the provided content.
 - Do not hallucinate names, numbers, dates, or background context.
-- Do NOT ignore secondary news sections, "other news" lists, tools sections, or papers/reports about external products/projects.
+- Do not ignore secondary news sections when the email is a curated_digest.
 - Titles must be specific story headlines from content, not meta labels.
 - Never output classification/meta titles such as:
   "Curated digest", "Single-topic article", "Type A", "Type B", "Newsletter overview".
 - Summaries must describe the story itself (2-3 sentences), not the format of the newsletter.
-
-If no extractable news story exists (e.g. purely transactional, promotional, or account notification email), return {"stories":[]}.
+- If content_type is promotional, return an empty stories array.
 """
 
 @dataclass
@@ -171,14 +171,11 @@ def _extract_from_single(newsletter: Newsletter) -> list[Story]:
     clean_text = _scrub_pii(_strip_urls(newsletter.body))
 
     prompt = (
-        f"Extract news stories from this newsletter.\n\n"
-        f"IMPORTANT: If this is a single article (one author writing about one theme, "
-        f"even with multiple numbered sections, speaker summaries, or sub-topics), "
-        f"output EXACTLY ONE story. Conference recaps, event summaries, deep-dives, "
-        f"tutorials, and opinion pieces are always ONE story. "
-        f"Only output multiple stories if this is a curated digest where each item "
-        f"independently links to or summarizes a different external source.\n\n"
-        f"IMPORTANT: Only use facts from the text below. Do NOT invent or add background details not in the source.\n\n"
+        f"Classify this email first, then extract stories using the matching rule.\n"
+        f"Return JSON only. Use content_type=curated_digest for independent news/link roundups, "
+        f"content_type=single_article for one article/essay/recap/tutorial, and "
+        f"content_type=promotional when there is no extractable news story.\n\n"
+        f"Use only facts from the text below. Do not invent or add background details.\n\n"
         f"Newsletter: {_scrub_pii(newsletter.subject)}\n"
         f"From: {_scrub_pii(newsletter.sender)}\n"
         f"Date: {newsletter.date}\n\n"
@@ -193,6 +190,10 @@ def _extract_from_single(newsletter: Newsletter) -> list[Story]:
     format_schema = {
         "type": "object",
         "properties": {
+            "content_type": {
+                "type": "string",
+                "enum": ["curated_digest", "single_article", "promotional"],
+            },
             "stories": {
                 "type": "array",
                 "items": {
@@ -205,7 +206,7 @@ def _extract_from_single(newsletter: Newsletter) -> list[Story]:
                 },
             }
         },
-        "required": ["stories"],
+        "required": ["content_type", "stories"],
     }
 
     response = llm_client.chat(messages=messages, format_schema=format_schema)
