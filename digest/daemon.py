@@ -1,6 +1,7 @@
 from digest.gmail_auth import get_gmail_service
 from config import MAX_FETCH_RESULTS, SIMILARITY_THRESHOLD
 import digest.llm_client as llm_client
+from digest.media_cache import cache_remote_image
 from digest.storage import StoryDB
 from digest.story_extractor import extract_stories
 from digest.gmail_fetcher import fetch_newsletters
@@ -370,6 +371,11 @@ def process_telegram_posts(since: datetime | None = None):
             primary_image = post.images[0]
         elif post.video_thumbs:
             primary_image = post.video_thumbs[0]
+        if primary_image:
+            try:
+                primary_image = cache_remote_image(primary_image, "telegram")
+            except Exception as exc:
+                print(f"      image cache failed: {exc}")
 
         story_id = db.add_story(
             title=story.title,

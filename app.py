@@ -12,8 +12,9 @@ from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
 
 import humanize
-from flask import Flask, jsonify, redirect, render_template, request
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_file
 from config import STORIES_DB
+from digest.media_cache import media_file_path
 from digest.gmail_auth import get_gmail_service
 from digest.gmail_fetcher import fetch_newsletter_by_id, message_id_from_gmail_url, normalize_email_text
 
@@ -50,6 +51,14 @@ def _hash_int(s: str) -> int:
     import hashlib
 
     return int(hashlib.md5((s or "").encode("utf-8")).hexdigest()[:8], 16)
+
+
+@app.get("/media/<path:rel_path>")
+def media(rel_path: str):
+    path = media_file_path(rel_path)
+    if path is None or not path.exists() or not path.is_file():
+        abort(404)
+    return send_file(path)
 
 def _stories_conn(readonly: bool = True) -> sqlite3.Connection | None:
     if not STORIES_DB_PATH.exists():
