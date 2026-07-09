@@ -50,6 +50,10 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 EMBEDDING_PROVIDER = os.getenv(
     "EMBEDDING_PROVIDER", "gemini").strip().lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_API_KEYS = []
+for _key in [GEMINI_API_KEY, *_csv_env("GEMINI_API_KEYS", [])]:
+    if _key and _key not in GEMINI_API_KEYS:
+        GEMINI_API_KEYS.append(_key)
 GEMINI_EMBEDDING_MODEL = os.getenv(
     "GEMINI_EMBEDDING_MODEL", "gemini-embedding-001").strip()
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")

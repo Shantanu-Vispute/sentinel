@@ -86,6 +86,23 @@ def _parse_iso_ts(s: str) -> int:
         return 0
     return int(dt.timestamp())
 
+def _parsed_ts(s: str) -> float:
+    dt = _parse_iso_dt(s or "")
+    return dt.timestamp() if dt is not None else 0.0
+
+def _mention_sort_key(mention: dict) -> tuple[float, float, int]:
+    return (
+        _parsed_ts(mention.get("date") or ""),
+        _parsed_ts(mention.get("created_at") or ""),
+        int(mention.get("id") or 0),
+    )
+
+def _timeline_sort_key(entry: dict) -> tuple[float, int]:
+    return (
+        _parsed_ts(entry.get("date") or ""),
+        int(entry.get("id") or 0),
+    )
+
 def _parse_iso_dt(s: str) -> datetime | None:
     if not s:
         return None
@@ -942,20 +959,22 @@ def api_digest_story(story_id: str):
     mentions = [
         dict(mention)
         for mention in conn.execute(
-            "SELECT * FROM mentions WHERE story_id=? ORDER BY date DESC",
+            "SELECT * FROM mentions WHERE story_id=?",
             (story_id,),
         ).fetchall()
     ]
+    mentions.sort(key=_mention_sort_key, reverse=True)
     mentions = _hydrate_email_mentions(conn, mentions)
     for mention in mentions:
         mention["date_relative"] = _relative_time_label(mention.get("date") or "")
     timeline = [
         dict(entry)
         for entry in conn.execute(
-            "SELECT * FROM timeline_entries WHERE story_id=? ORDER BY date DESC",
+            "SELECT * FROM timeline_entries WHERE story_id=?",
             (story_id,),
         ).fetchall()
     ]
+    timeline.sort(key=_timeline_sort_key)
     for entry in timeline:
         entry["date_relative"] = _relative_time_label(entry.get("date") or "")
     conn.close()
@@ -1039,24 +1058,28 @@ def digest_story(story_id: str):
     story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
     story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
     mentions = conn.execute(
-        "SELECT * FROM mentions WHERE story_id=? ORDER BY date DESC",
+        "SELECT * FROM mentions WHERE story_id=?",
         (story_id,),
     ).fetchall()
-    mention_dicts = _hydrate_email_mentions(conn, [dict(mention) for mention in mentions])
+    mention_dicts = [dict(mention) for mention in mentions]
+    mention_dicts.sort(key=_mention_sort_key, reverse=True)
+    mention_dicts = _hydrate_email_mentions(conn, mention_dicts)
     for mention in mention_dicts:
         mention["date_relative"] = _relative_time_label(mention.get("date") or "")
     timeline = conn.execute(
-        "SELECT * FROM timeline_entries WHERE story_id=? ORDER BY date DESC",
+        "SELECT * FROM timeline_entries WHERE story_id=?",
         (story_id,),
     ).fetchall()
+    timeline_entries = [dict(entry) for entry in timeline]
+    timeline_entries.sort(key=_timeline_sort_key)
     conn.close()
     return render_template(
         "digest_story.html",
         story=story,
         mentions=mention_dicts,
         timeline=[
-            {**dict(entry), "date_relative": _relative_time_label(dict(entry).get("date") or "")}
-            for entry in timeline
+            {**entry, "date_relative": _relative_time_label(entry.get("date") or "")}
+            for entry in timeline_entries
         ],
     )
 

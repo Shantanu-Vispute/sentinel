@@ -22,6 +22,7 @@ chmod +x "$ROOT/scripts/run-email.sh" "$ROOT/scripts/run-telegram.sh" "$ROOT/scr
 
 if crontab -l > "$TMP_FILE" 2>/dev/null; then
   awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
+    index($0, "\\n# " begin "\\n") {next}
     $0 == "# " begin {skip=1; next}
     $0 == "# " end {skip=0; next}
     skip != 1 {print}
@@ -33,14 +34,14 @@ fi
 
 {
   cat "$TMP_FILE"
-  printf '\\n# %s\\n' "$BEGIN_MARKER"
-  printf 'SHELL=/bin/bash\\n'
-  printf 'PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin\\n'
-  printf '%s %q\\n' "$EMAIL_SCHEDULE" "$ROOT/scripts/run-email.sh"
-  printf '%s %q\\n' "$TELEGRAM_SCHEDULE" "$ROOT/scripts/run-telegram.sh"
-  printf '%s %q\\n' "$SOCIAL_SCHEDULE" "$ROOT/scripts/run-social.sh"
-  printf '%s %q\\n' "$YOUTUBE_SCHEDULE" "$ROOT/scripts/run-youtube.sh"
-  printf '# %s\\n' "$END_MARKER"
+  printf '\n# %s\n' "$BEGIN_MARKER"
+  printf 'SHELL=/bin/bash\n'
+  printf 'PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin\n'
+  printf '%s %q\n' "$EMAIL_SCHEDULE" "$ROOT/scripts/run-email.sh"
+  printf '%s %q\n' "$TELEGRAM_SCHEDULE" "$ROOT/scripts/run-telegram.sh"
+  printf '%s %q\n' "$SOCIAL_SCHEDULE" "$ROOT/scripts/run-social.sh"
+  printf '%s %q\n' "$YOUTUBE_SCHEDULE" "$ROOT/scripts/run-youtube.sh"
+  printf '# %s\n' "$END_MARKER"
 } | crontab -
 
 rm -f "$TMP_FILE"

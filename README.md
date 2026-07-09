@@ -27,10 +27,11 @@ Gemini is the default backend. Add your Gemini API key to `.env`:
 LLM_PROVIDER=gemini
 EMBEDDING_PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_api_key
+GEMINI_API_KEYS=your_gemini_api_key,your_second_gemini_api_key
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 ```
 
-Sentinel will try Gemini chat models in this order and only rotate on rate-limit or quota errors:
+`GEMINI_API_KEY` is still supported for one key. `GEMINI_API_KEYS` can hold a comma-separated list; Sentinel will rotate to the next key on Gemini rate-limit or quota errors. Sentinel will also try Gemini chat models in this order on rate-limit or quota errors:
 
 ```text
 gemini-3.1-flash-lite-preview

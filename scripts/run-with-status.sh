@@ -15,6 +15,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STATE_DIR="$ROOT/state"
 STATUS_PATH="$STATE_DIR/sync_status_${JOB}.json"
 PYTHON_BIN="$ROOT/venv/bin/python3"
+RUNNER_LOCK_DIR="$STATE_DIR/sync_runner_${JOB}.lockdir"
 
 if [ ! -x "$PYTHON_BIN" ]; then
   PYTHON_BIN="python3"
@@ -22,6 +23,14 @@ fi
 
 mkdir -p "$STATE_DIR"
 touch "$LOG_PATH"
+
+if ! mkdir "$RUNNER_LOCK_DIR" 2>/dev/null; then
+  exit 75
+fi
+cleanup_lock() {
+  rmdir "$RUNNER_LOCK_DIR" 2>/dev/null || true
+}
+trap cleanup_lock EXIT INT TERM
 
 write_status() {
   local status="$1"
@@ -80,6 +89,8 @@ set -e
 LAST_LINE="$(tail -n 1 "$LOG_PATH" 2>/dev/null || true)"
 if [ "$RC" -eq 0 ]; then
   write_status "success" "1" "${LAST_LINE:-Completed ${LABEL}}"
+elif [ "$RC" -eq 75 ] && [[ "$LAST_LINE" == Another\ *\ instance\ is\ already\ running.* ]]; then
+  write_status "running" "0" "$LAST_LINE"
 else
   write_status "failed" "0" "${LAST_LINE:-${LABEL} failed with exit ${RC}}"
 fi

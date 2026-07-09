@@ -7,7 +7,7 @@ from google.genai import types
 from config import (
     EMBEDDING_MODEL,
     EMBEDDING_PROVIDER,
-    GEMINI_API_KEY,
+    GEMINI_API_KEYS,
     GEMINI_EMBEDDING_MODEL,
     LLM_PROVIDER,
     LLM_TIMEOUT_SECONDS,
@@ -126,12 +126,18 @@ class GeminiClient:
     provider_name = "gemini"
 
     def __init__(self):
-        if not GEMINI_API_KEY:
+        if not GEMINI_API_KEYS:
             raise ValueError(
-                "GEMINI_API_KEY is required when LLM_PROVIDER or "
+                "GEMINI_API_KEY or GEMINI_API_KEYS is required when LLM_PROVIDER or "
                 "EMBEDDING_PROVIDER is set to gemini."
             )
-        self.client = genai.Client(api_key=GEMINI_API_KEY)
+        self.clients = [
+            genai.Client(
+                api_key=api_key,
+                http_options=types.HttpOptions(timeout=LLM_TIMEOUT_SECONDS * 1000),
+            )
+            for api_key in GEMINI_API_KEYS
+        ]
 
     def chat(
             self,
@@ -145,66 +151,91 @@ class GeminiClient:
         last_error = None
 
         for model_name in models:
-            try:
-                response = self.client.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=self._build_generate_config(
-                        model_name=model_name,
-                        system_instruction=system_instruction,
-                        temperature=temperature,
-                        format_schema=format_schema,
-                    ),
-                )
-                return ChatResponse(
-                    message=Message(content=self._extract_text(response)),
-                    model=model_name,
-                    provider=self.provider_name,
-                )
-            except Exception as exc:
-                if override_model or not self._is_rate_limit_error(exc):
-                    raise
-                last_error = exc
-                print(
-                    f"      WARN: Gemini model {model_name} hit a rate limit; "
-                    f"trying next model"
-                )
+            for key_index, client in enumerate(self.clients, 1):
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=self._build_generate_config(
+                            model_name=model_name,
+                            system_instruction=system_instruction,
+                            temperature=temperature,
+                            format_schema=format_schema,
+                        ),
+                    )
+                    return ChatResponse(
+                        message=Message(content=self._extract_text(response)),
+                        model=model_name,
+                        provider=self.provider_name,
+                    )
+                except Exception as exc:
+                    if not self._is_rate_limit_error(exc):
+                        raise
+                    last_error = exc
+                    print(
+                        f"      WARN: Gemini model {model_name} hit a rate limit "
+                        f"on key {key_index}/{len(self.clients)}; trying next key/model"
+                    )
+                    if override_model and key_index == len(self.clients):
+                        raise
 
         tried = ", ".join(models)
         raise RuntimeError(
-            f"All Gemini chat models were rate-limited: {tried}"
+            f"All Gemini chat models/keys were rate-limited: {tried}"
         ) from last_error
 
     def embed(self, input_text: str | list[str]) -> EmbedResponse:
-        response = self.client.models.embed_content(
-            model=GEMINI_EMBEDDING_MODEL,
-            contents=input_text,
-        )
-        embeddings = []
-        if getattr(response, "embeddings", None):
-            embeddings = [item.values for item in response.embeddings]
-        elif getattr(response, "embedding", None):
-            embeddings = [response.embedding.values]
-        return EmbedResponse(
-            embeddings=embeddings,
-            model=GEMINI_EMBEDDING_MODEL,
-            provider=self.provider_name,
-        )
+        last_error = None
+        for key_index, client in enumerate(self.clients, 1):
+            try:
+                response = client.models.embed_content(
+                    model=GEMINI_EMBEDDING_MODEL,
+                    contents=input_text,
+                )
+                embeddings = []
+                if getattr(response, "embeddings", None):
+                    embeddings = [item.values for item in response.embeddings]
+                elif getattr(response, "embedding", None):
+                    embeddings = [response.embedding.values]
+                return EmbedResponse(
+                    embeddings=embeddings,
+                    model=GEMINI_EMBEDDING_MODEL,
+                    provider=self.provider_name,
+                )
+            except Exception as exc:
+                if not self._is_rate_limit_error(exc):
+                    raise
+                last_error = exc
+                print(
+                    f"      WARN: Gemini embedding hit a rate limit on key "
+                    f"{key_index}/{len(self.clients)}; trying next key"
+                )
+        raise RuntimeError("All Gemini embedding keys were rate-limited") from last_error
 
     def healthcheck(self) -> BackendCheck:
-        try:
-            pager = self.client.models.list(
-                config=types.ListModelsConfig(page_size=1)
-            )
-            next(iter(pager), None)
+        last_error = None
+        ok_count = 0
+        for client in self.clients:
+            try:
+                pager = client.models.list(
+                    config=types.ListModelsConfig(page_size=1)
+                )
+                next(iter(pager), None)
+                ok_count += 1
+            except Exception as exc:
+                last_error = exc
+        if ok_count:
             return BackendCheck(
                 label="Gemini API",
                 ok=True,
                 detail=(
+                    f"keys={ok_count}/{len(self.clients)}, "
                     f"chat={', '.join(_GEMINI_CHAT_MODELS)}, "
                     f"embed={GEMINI_EMBEDDING_MODEL}"
                 ),
             )
+        try:
+            raise last_error or RuntimeError("No Gemini API keys configured")
         except Exception as exc:
             return BackendCheck(
                 label="Gemini API",
@@ -346,12 +377,15 @@ class LLMClient:
         print("LLM CONFIG")
         print(f"   Chat Provider:   {self.chat_backend.provider_name}")
         if self.chat_backend.provider_name == "gemini":
+            print(f"   Gemini Keys:     {len(GEMINI_API_KEYS)}")
             print(f"   Chat Models:     {' -> '.join(_GEMINI_CHAT_MODELS)}")
         else:
             print(f"   Chat Model:      {OLLAMA_MODEL}")
             print(f"   Ollama Host:     {OLLAMA_HOST}")
         print(f"   Embed Provider:  {self.embedding_backend.provider_name}")
         if self.embedding_backend.provider_name == "gemini":
+            if self.chat_backend.provider_name != "gemini":
+                print(f"   Gemini Keys:     {len(GEMINI_API_KEYS)}")
             print(f"   Embed Model:     {GEMINI_EMBEDDING_MODEL}")
         else:
             print(f"   Embed Model:     {EMBEDDING_MODEL}")

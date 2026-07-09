@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import pathlib
 import sqlite3
 import subprocess
@@ -14,6 +15,7 @@ PROFILE_DIR = STATE_DIR / "browser_profile"
 COOKIES_FILE = STATE_DIR / "youtube_cookies.txt"
 DB_PATH = STATE_DIR / "stories.db"
 LOG_PATH = STATE_DIR / "youtube.log"
+BROWSER_CHANNEL = (os.getenv("PLAYWRIGHT_BROWSER_CHANNEL") or "chrome").strip() or None
 
 WATCH_LATER_URL = "https://www.youtube.com/playlist?list=WL"
 
@@ -86,6 +88,7 @@ def export_cookies() -> None:
     with sync_playwright() as pw:
         ctx = pw.chromium.launch_persistent_context(
             str(PROFILE_DIR),
+            channel=BROWSER_CHANNEL,
             headless=True,
             args=[
                 "--no-sandbox",
@@ -117,11 +120,11 @@ def export_cookies() -> None:
 def fetch_watch_later(limit: int | None = None) -> list[dict]:
     if not COOKIES_FILE.exists():
         log("no cookies file — run with --export-cookies first")
-        return []
+        raise RuntimeError("missing YouTube cookies")
     yt_dlp_bin = _resolve_yt_dlp()
     if not yt_dlp_bin:
         log("yt-dlp is not installed or not on PATH")
-        return []
+        raise RuntimeError("yt-dlp is not installed")
     cmd = [
         yt_dlp_bin,
         "--cookies", str(COOKIES_FILE),
@@ -138,10 +141,10 @@ def fetch_watch_later(limit: int | None = None) -> list[dict]:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     except subprocess.TimeoutExpired:
         log("yt-dlp timed out")
-        return []
+        raise RuntimeError("yt-dlp timed out")
     if proc.returncode != 0:
         log(f"yt-dlp failed (exit {proc.returncode}): {proc.stderr[:500]}")
-        return []
+        raise RuntimeError(f"yt-dlp failed with exit {proc.returncode}")
     out = []
     for line in proc.stdout.splitlines():
         line = line.strip()

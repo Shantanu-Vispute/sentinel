@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import pathlib
 import random
 import re
@@ -15,6 +16,7 @@ STATE_DIR = HERE / "state"
 PROFILE_DIR = STATE_DIR / "browser_profile"
 DB_PATH = STATE_DIR / "stories.db"
 LOG_PATH = STATE_DIR / "social.log"
+BROWSER_CHANNEL = (os.getenv("PLAYWRIGHT_BROWSER_CHANNEL") or "chrome").strip() or None
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
@@ -135,6 +137,7 @@ def launch(headless: bool = True) -> tuple:
     pw = sync_playwright().start()
     ctx = pw.chromium.launch_persistent_context(
         str(PROFILE_DIR),
+        channel=BROWSER_CHANNEL,
         headless=headless,
         args=LAUNCH_ARGS,
         user_agent=USER_AGENT,
@@ -162,20 +165,25 @@ def scrape_twitter(
     if "login" in page.url.lower() or "flow/login" in page.url:
         log("twitter: redirected to login — session not persisted. Re-run --login.")
         page.close()
-        return []
+        raise RuntimeError("twitter session not persisted")
 
     try:
         page.wait_for_selector('article[data-testid="tweet"]', timeout=20_000)
         log("twitter: first tweet rendered")
     except Exception:
+        auth_failure = False
         try:
             title = page.title()
             body_txt = page.locator("body").inner_text(timeout=2000)[:300]
             log(
                 f"twitter: NO tweets after 20s. title={title!r} body-sample={body_txt!r}")
+            if "sign in to x" in body_txt.lower():
+                auth_failure = True
         except Exception:
             log("twitter: NO tweets after 20s and couldn't read page content")
         page.close()
+        if auth_failure:
+            raise RuntimeError("twitter not logged in")
         return []
 
     seen: set[str] = set()
@@ -517,7 +525,7 @@ def scrape_linkedin(
     if "login" in page.url.lower() or "signup" in page.url.lower():
         log("linkedin: not logged in — run --login first")
         page.close()
-        return []
+        raise RuntimeError("linkedin not logged in")
 
     seen: set[str] = set()
     collected: list[dict] = []
@@ -724,6 +732,7 @@ def do_login() -> None:
     with sync_playwright() as pw:
         ctx = pw.chromium.launch_persistent_context(
             str(PROFILE_DIR),
+            channel=BROWSER_CHANNEL,
             headless=False,
             args=LAUNCH_ARGS,
             user_agent=USER_AGENT,
@@ -779,6 +788,7 @@ def main():
         sys.exit(1)
 
     pw, ctx = launch(headless=not args.headful)
+    failed = False
     try:
         for src in sources:
             try:
@@ -794,9 +804,12 @@ def main():
                 _pause(4.0, 7.0)
             except Exception as e:
                 log(f"{src}: FAILED — {e}")
+                failed = True
     finally:
         ctx.close()
         pw.stop()
+    if failed:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

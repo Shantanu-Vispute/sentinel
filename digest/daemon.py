@@ -20,14 +20,16 @@ def _acquire_lock(name: str = "daemon"):
     global _lock_fh, _lock_path
     _LOCK_DIR.mkdir(exist_ok=True)
     _lock_path = _LOCK_DIR / f"{name}.lock"
-    _lock_fh = open(_lock_path, "w")
+    _lock_fh = open(_lock_path, "a+")
     try:
         fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fh.seek(0)
+        _lock_fh.truncate()
         _lock_fh.write(str(os.getpid()))
         _lock_fh.flush()
     except OSError:
         print(f"Another {name} instance is already running. Exiting.")
-        sys.exit(0)
+        sys.exit(75)
 
 def _release_lock():
     if _lock_fh:
