@@ -16,11 +16,15 @@ from config import (
     TEMPERATURE,
 )
 
+# Ordered by free-tier headroom (RPM/RPD), best first, per AI Studio's quota
+# dashboard. gemini-3.1-flash-lite has ~25x the daily budget of everything
+# else, so it should absorb nearly all traffic; the rest are thin last resorts.
 _GEMINI_CHAT_MODELS = (
-    "gemini-3.1-flash-lite-preview",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite",  # RPM 15, RPD 500
+    "gemini-2.5-flash-lite",  # RPM 10, RPD 20
+    "gemini-2.5-flash",       # RPM 5,  RPD 20
+    "gemini-3-flash",         # RPM 5,  RPD 20
+    "gemini-3.5-flash",       # RPM 5,  RPD 20
 )
 
 
@@ -169,6 +173,15 @@ class GeminiClient:
                         provider=self.provider_name,
                     )
                 except Exception as exc:
+                    if self._is_model_unavailable_error(exc):
+                        last_error = exc
+                        print(
+                            f"      WARN: Gemini model {model_name} is unavailable "
+                            f"(retired/renamed); trying next model"
+                        )
+                        if override_model:
+                            raise
+                        break
                     if not self._is_rate_limit_error(exc):
                         raise
                     last_error = exc
@@ -328,6 +341,20 @@ class GeminiClient:
             "too many requests",
         )
         return any(marker in message for marker in rate_limit_markers)
+
+    @staticmethod
+    def _is_model_unavailable_error(exc: Exception) -> bool:
+        """True if the model itself is gone (retired/renamed), not just rate-limited.
+
+        Retrying other API keys against a dead model wastes calls for no benefit;
+        the caller should skip straight to the next model instead.
+        """
+        status_code = getattr(exc, "status_code", None)
+        if status_code == 404:
+            return True
+        message = str(exc).lower()
+        markers = ("not_found", "no longer available", "is not found")
+        return any(marker in message for marker in markers)
 
 
 class LLMClient:
