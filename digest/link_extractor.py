@@ -3,8 +3,12 @@ from urllib.parse import urlsplit
 
 import requests
 
+# href value may be double-quoted, single-quoted, or (technically-invalid-HTML
+# but common in real newsletter templates, e.g. Morning Brew) unquoted. The
+# closing </a> may also have whitespace before its '>' (e.g. Artificial
+# Analysis's templates wrap attributes/tags across many lines).
 _A_TAG_RE = re.compile(
-    r'<a\s+[^>]*href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+    r'<a\s+[^>]*?href\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>`]+))[^>]*>(.*?)</a\s*>',
     re.IGNORECASE | re.DOTALL,
 )
 _INNER_TAG_RE = re.compile(r"<[^>]+>")
@@ -79,8 +83,8 @@ def extract_links_from_html(html: str) -> list[dict]:
 
     out = []
     for m in _A_TAG_RE.finditer(html):
-        href = (m.group(1) or "").strip()
-        anchor = _INNER_TAG_RE.sub(" ", m.group(2) or "").strip()
+        href = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+        anchor = _INNER_TAG_RE.sub(" ", m.group(4) or "").strip()
         anchor = _WS_RE.sub(" ", anchor)
         if not href:
             continue
@@ -142,7 +146,14 @@ def pick_primary_url(
     best_url, best_score, best_anchor_len = "", 0, 0
     for link in links:
         href = link.get("href") or ""
-        if _is_bad_url(href, sender_host):
+        # Don't apply the sender-self-domain check here: senders commonly
+        # route every real story link (not just unsubscribe/self links)
+        # through their own click-tracking subdomain (e.g. TLDR wraps every
+        # link via tracking.tldrnewsletter.com). Rejecting same-domain hrefs
+        # at this stage would kill 100% of usable links for such senders
+        # before unshorten() below ever gets to reveal the true destination.
+        # The self-domain check still applies after unshortening.
+        if _is_bad_url(href):
             continue
         anchor_tokens = _word_set(link.get("anchor") or "")
         ctx_tokens = _word_set(link.get("context") or "")

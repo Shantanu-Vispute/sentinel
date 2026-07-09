@@ -122,6 +122,7 @@ class Story:
     title: str
     summary: str
     primary_url: str = ""
+    primary_image_url: str = ""
     source_newsletter: str = ""
     source_email_body: str = ""
     source_sender: str = ""
@@ -269,6 +270,16 @@ def _extract_from_single(newsletter: Newsletter) -> list[Story]:
                 sender_host=sender_host)
             if url:
                 story.primary_url = url
+    except Exception as _e:
+        pass
+
+    try:
+        from digest.image_extractor import pick_primary_image
+        images = getattr(newsletter, "images", None) or []
+        for story in parsed:
+            image_url = pick_primary_image(story.title, story.summary, images)
+            if image_url:
+                story.primary_image_url = image_url
     except Exception as _e:
         pass
 

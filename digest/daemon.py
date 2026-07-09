@@ -198,6 +198,14 @@ def _persist_story(
             merged_count += 1
             print(f"      → MERGED into [{existing_id[:8]}]")
     else:
+        primary_image = getattr(story, "primary_image_url", "")
+        if primary_image:
+            try:
+                primary_image = cache_remote_image(primary_image, source_type)
+            except Exception as exc:
+                print(f"      image cache failed: {exc}")
+                primary_image = ""
+
         story_id = db.add_story(
             title=story.title,
             summary=story.summary,
@@ -212,6 +220,7 @@ def _persist_story(
             mention_raw_body=story.source_email_body,
             category="other",
             primary_url=getattr(story, "primary_url", ""),
+            primary_image_url=primary_image,
             source_type=source_type,
         )
         new_count += 1
