@@ -1,0 +1,54 @@
+{% set tg_card = s.source_type == 'telegram' %}
+<div class="story-card {% if not s.is_read %}unread{% endif %} has-image" data-story-id="{{ s.id }}" role="button" tabindex="0">
+  <span class="source-chip">{{ s.source_label or s.source_type }}</span>
+  <button class="read-btn" data-read title="Skip">✕</button>
+  {% if s.primary_image_url %}
+    <img class="card-thumb" src="{{ s.primary_image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+  {% else %}
+    <div class="card-thumb-placeholder">{{ (s.title or '?') | trim | first | upper }}</div>
+  {% endif %}
+  <div class="card-body">
+    <a class="story-title-link" href="/digest/{{ s.id }}">
+      <div class="story-title">{{ s.title }}</div>
+    </a>
+    <div class="story-summary">{{ s.summary }}</div>
+    {% if tg_card and s.links %}
+      <div class="story-links">
+        {% for l in s.links[:4] %}
+          <a href="{{ l.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+            <img class="favicon" src="https://www.google.com/s2/favicons?domain={{ l.host }}&sz=32" alt="">
+            {{ l.host }}
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <div class="story-meta">
+      {% if tg_card and s.primary_url_host %}
+        <a href="{{ s.primary_url }}" target="_blank" rel="noopener" class="story-host">
+          <img class="favicon" src="https://www.google.com/s2/favicons?domain={{ s.primary_url_host }}&sz=32" alt="">
+          {{ s.primary_url_host }}
+        </a>
+      {% elif s.senders %}
+        <a href="/digest/{{ s.id }}" class="mentions-chip">
+          <span class="avatar-stack">
+            {% for sn in s.senders[:3] %}
+              {% set hue = (sn | hash_int) % 360 %}
+              <span class="avatar" title="{{ sn }}" style="background: hsl({{ hue }}, 55%, 48%);">{{ sn | trim | first | upper }}</span>
+            {% endfor %}
+            {% if s.senders | length > 3 %}
+              <span class="avatar more">+{{ s.senders | length - 3 }}</span>
+            {% endif %}
+          </span>
+          {% if s.new_info_count %}<span class="updates">{{ s.new_info_count }} updates</span>{% endif %}
+        </a>
+      {% else %}
+        <a href="/digest/{{ s.id }}" style="color: inherit; text-decoration: none;">
+          {{ s.mention_count }} mention{{ '' if s.mention_count == 1 else 's' }}
+        </a>
+      {% endif %}
+      {% if s.last_updated_relative %}
+        <span title="{{ s.last_updated_display or s.last_updated }}">{{ s.last_updated_relative }}</span>
+      {% endif %}
+    </div>
+  </div>
+</div>

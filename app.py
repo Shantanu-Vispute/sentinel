@@ -697,7 +697,6 @@ def digest_list():
             "source_rank": 0,
             "sort_ts": ts,
         }
-
         seen_senders = set()
         unique_senders = []
         for sender in senders_by_story.get(row["id"], []):
@@ -802,45 +801,11 @@ def digest_list():
     elif state == "skipped":
         stories = [story for story in stories if story["skipped"]]
 
-    def _score(story: dict) -> float:
-        last_updated = story.get("last_updated") or ""
-        last_ts = _parse_iso_ts(last_updated)
-        age_hours = max((now_t - last_ts) / 3600, 0.0) if last_ts else 9999.0
-        freshness = max(0.2, math.exp(-age_hours / 36.0))
-        mention_count = max(int(story.get("mention_count") or 0), 1)
-        new_info_count = max(int(story.get("new_info_count") or 0), 0)
-        distinct_sender_count = max(int(story.get("distinct_sender_count") or 0), 1)
-        distinct_source_type_count = max(
-            len(story.get("distinct_source_types") or []),
-            1,
-        )
-        repeated_same_sender = max(mention_count - distinct_sender_count, 0)
-        mention_strength = math.log1p(mention_count) * 2.6
-        sender_bonus = math.log1p(distinct_sender_count) * 1.2
-        cross_source_bonus = (distinct_source_type_count - 1) * 2.4
-        evolution_bonus = new_info_count * 1.8
-        image_bonus = 0.35 if story.get("primary_image_url") else 0.0
-        link_bonus = 0.3 if story.get("primary_url") else 0.0
-        repetition_penalty = repeated_same_sender * 0.55
-        return (
-            (mention_strength + sender_bonus + cross_source_bonus + evolution_bonus + image_bonus + link_bonus)
-            * freshness
-            - repetition_penalty
-        )
-
     def _sort_rank(story: dict) -> int:
         rank = int(story.get("source_rank") or 0)
         return -rank if rank else 0
 
-    if sort == "score":
-        stories.sort(
-            key=lambda story: (
-                _score(story),
-                story.get("sort_ts") or 0,
-                _sort_rank(story),
-                story["last_updated"] or ""),
-            reverse=True)
-    elif sort == "mentions":
+    if sort == "mentions":
         stories.sort(
             key=lambda story: (
                 story["mention_count"],
@@ -858,6 +823,14 @@ def digest_list():
             reverse=True)
     elif sort == "oldest":
         stories.sort(key=lambda story: (story.get("sort_ts") or 0, -_sort_rank(story), story["last_updated"] or ""))
+    elif sort == "recent":
+        stories.sort(
+            key=lambda story: (
+                story.get("sort_ts") or 0,
+                _sort_rank(story),
+                story["last_updated"] or "",
+            ),
+            reverse=True)
     else:
         sort = "recent"
         stories.sort(
@@ -870,10 +843,37 @@ def digest_list():
 
     total_unskipped = sum(source_count_map.values())
 
+    try:
+        per_page = int(request.args.get("per_page") or 50)
+    except ValueError:
+        per_page = 50
+    per_page = max(10, min(per_page, 200))
+    try:
+        page = int(request.args.get("page") or 1)
+    except ValueError:
+        page = 1
+    page = max(page, 1)
+
+    total = len(stories)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_stories = stories[start:end]
+    has_more = end < total
+
+    if (request.args.get("partial") or "").strip() == "1":
+        return render_template(
+            "_digest_cards_page.html",
+            stories=page_stories,
+            has_more=has_more,
+            page=page,
+            per_page=per_page,
+            total=total,
+        )
+
     return render_template(
         "digest_list.html",
-        stories=stories,
-        total=len(stories),
+        stories=page_stories,
+        total=total,
         total_all=total_unskipped,
         missing=False,
         source_counts=source_counts,
@@ -883,6 +883,9 @@ def digest_list():
         source=source,
         sync_label=_sync_button_label(source),
         sync_statuses=_all_sync_statuses(),
+        page=page,
+        per_page=per_page,
+        has_more=has_more,
     )
 
 @app.route("/api/digest/skip", methods=["POST"])

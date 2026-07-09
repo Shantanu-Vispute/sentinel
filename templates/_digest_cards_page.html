@@ -1,0 +1,3 @@
+<div data-has-more="{{ '1' if has_more else '0' }}" data-page="{{ page }}" data-total="{{ total }}">
+{% for s in stories %}{% include "_digest_card.html" %}{% endfor %}
+</div>

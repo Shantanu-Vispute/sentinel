@@ -189,6 +189,16 @@ html[data-theme="dark"] .story-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.
 .story-links a:hover { color: var(--accent); background: var(--accent-soft); }
 .story-links .favicon { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
 .empty-state { text-align: center; padding: 80px 20px; color: var(--text-subtle); }
+.infinite-loader {
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 12px 48px;
+  color: var(--text-subtle);
+  font-size: 13px;
+}
+.infinite-loader[hidden] { display: none; }
 
 /* search toolbar */
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
@@ -470,6 +480,11 @@ html:not([data-theme="dark"]) .moon { display: none; }
       <h1>Sentinel</h1>
       <div class="subtitle">{{ total_all or total }} stories</div>
     </div>
+    <div class="section-label">Views</div>
+    <ul class="side-nav">
+      <li><a href="/digest" class="active">Digest</a></li>
+      <li><a href="/explore">Explore</a></li>
+    </ul>
     <div class="section-label">Sources</div>
     <ul class="side-nav">
       <li><a href="{{ nav_url(src='all') }}" class="{% if source == 'all' %}active{% endif %}">All <span class="count">{{ total_all }}</span></a></li>
@@ -501,7 +516,6 @@ html:not([data-theme="dark"]) .moon { display: none; }
              autofocus>
       <select name="sort" onchange="this.form.submit()" aria-label="Sort">
         <option value="recent"   {% if sort == 'recent'   %}selected{% endif %}>Most recent</option>
-        <option value="score"    {% if sort == 'score'    %}selected{% endif %}>Top stories</option>
         <option value="mentions" {% if sort == 'mentions' %}selected{% endif %}>Most mentioned</option>
         <option value="evolved"  {% if sort == 'evolved'  %}selected{% endif %}>Most evolved</option>
         <option value="oldest"   {% if sort == 'oldest'   %}selected{% endif %}>Oldest first</option>
@@ -569,63 +583,19 @@ html:not([data-theme="dark"]) .moon { display: none; }
     {% elif not stories %}
       <div class="empty-state"><p>No stories yet. Run Sentinel ingestion to populate.</p></div>
     {% else %}
-      <div class="grid">
+      <div class="grid" id="storyGrid">
         {% for s in stories %}
-          {% set tg_card = s.source_type == 'telegram' %}
-          <div class="story-card {% if not s.is_read %}unread{% endif %} has-image" data-story-id="{{ s.id }}" role="button" tabindex="0">
-            <span class="source-chip">{{ s.source_label or s.source_type }}</span>
-            <button class="read-btn" data-read title="Skip">✕</button>
-            {% if s.primary_image_url %}
-              <img class="card-thumb" src="{{ s.primary_image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
-            {% else %}
-              <div class="card-thumb-placeholder">{{ (s.title or '?') | trim | first | upper }}</div>
-            {% endif %}
-            <div class="card-body">
-	            <a class="story-title-link" href="/digest/{{ s.id }}">
-	              <div class="story-title">{{ s.title }}</div>
-	            </a>
-	            <div class="story-summary">{{ s.summary }}</div>
-	            {% if tg_card and s.links %}
-              <div class="story-links">
-                {% for l in s.links[:4] %}
-                  <a href="{{ l.url }}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
-                    <img class="favicon" src="https://www.google.com/s2/favicons?domain={{ l.host }}&sz=32" alt="">
-                    {{ l.host }}
-                  </a>
-                {% endfor %}
-              </div>
-            {% endif %}
-            <div class="story-meta">
-              {% if tg_card and s.primary_url_host %}
-                <a href="{{ s.primary_url }}" target="_blank" rel="noopener" class="story-host">
-                  <img class="favicon" src="https://www.google.com/s2/favicons?domain={{ s.primary_url_host }}&sz=32" alt="">
-                  {{ s.primary_url_host }}
-                </a>
-              {% elif s.senders %}
-                <a href="/digest/{{ s.id }}" class="mentions-chip">
-                  <span class="avatar-stack">
-                    {% for sn in s.senders[:3] %}
-                      {% set hue = (sn | hash_int) % 360 %}
-                      <span class="avatar" title="{{ sn }}" style="background: hsl({{ hue }}, 55%, 48%);">{{ sn | trim | first | upper }}</span>
-                    {% endfor %}
-                    {% if s.senders | length > 3 %}
-                      <span class="avatar more">+{{ s.senders | length - 3 }}</span>
-                    {% endif %}
-                  </span>
-                  {% if s.new_info_count %}<span class="updates">{{ s.new_info_count }} updates</span>{% endif %}
-                </a>
-              {% else %}
-                <a href="/digest/{{ s.id }}" style="color: inherit; text-decoration: none;">
-                  {{ s.mention_count }} mention{{ '' if s.mention_count == 1 else 's' }}
-                </a>
-              {% endif %}
-              {% if s.last_updated_relative %}
-                <span title="{{ s.last_updated_display or s.last_updated }}">{{ s.last_updated_relative }}</span>
-              {% endif %}
-            </div>
-            </div>
-          </div>
+          {% include "_digest_card.html" %}
         {% endfor %}
+      </div>
+      <div
+        class="infinite-loader"
+        id="infiniteLoader"
+        data-next-page="{{ page + 1 }}"
+        data-has-more="{{ '1' if has_more else '0' }}"
+        {% if not has_more %}hidden{% endif %}
+        aria-live="polite">
+        Loading more stories…
       </div>
     {% endif %}
   </main>
@@ -744,24 +714,13 @@ document.getElementById("themeToggle").addEventListener("click", function () {
     history.pushState({}, "", qs ? "?" + qs : window.location.pathname);
   }
 
-  // card-level click handler — whole card opens modal, except when clicking a real link inside or the read ✕
-  document.querySelectorAll(".story-card").forEach(function (card) {
-    function activate(e) {
-      if (e.target.closest("a") || e.target.closest(".read-btn")) return;
-      e.preventDefault();
-      var id = card.getAttribute("data-story-id");
-      if (id) { open(id); card.classList.remove("unread"); }
-    }
-    card.addEventListener("click", activate);
-    card.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " ") activate(e);
-    });
-  });
-
-  // ✕ skip button — registered in capture phase so it runs BEFORE the
-  // card's click handler can bubble up and open the modal.
-  document.querySelectorAll(".read-btn").forEach(function (btn) {
-    btn.addEventListener("click", function (e) {
+  // Event delegation on the grid — works for cards rendered later by infinite scroll.
+  var grid = document.getElementById("storyGrid");
+  if (grid) {
+    // Capture-phase: ✕ skip button handled before bubble reaches the card.
+    grid.addEventListener("click", function (e) {
+      var btn = e.target.closest(".read-btn");
+      if (!btn || !grid.contains(btn)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       e.stopPropagation();
@@ -780,17 +739,39 @@ document.getElementById("themeToggle").addEventListener("click", function () {
         setTimeout(function () { card.remove(); }, 200);
       });
     }, true);
-    btn.addEventListener("mousedown", function (e) { e.stopPropagation(); }, true);
-  });
-  // also catch clicks on the title link (which IS an <a>) — route to modal
-  document.querySelectorAll(".story-title-link").forEach(function (a) {
-    a.addEventListener("click", function (e) {
+    grid.addEventListener("mousedown", function (e) {
+      if (e.target.closest(".read-btn")) e.stopPropagation();
+    }, true);
+
+    // Bubble-phase: card / title-link clicks open modal.
+    grid.addEventListener("click", function (e) {
+      if (e.target.closest(".read-btn")) return;
+      var titleLink = e.target.closest(".story-title-link");
+      if (titleLink) {
+        e.preventDefault();
+        var c1 = titleLink.closest(".story-card");
+        var id1 = c1 && c1.getAttribute("data-story-id");
+        if (id1) { open(id1); c1.classList.remove("unread"); }
+        return;
+      }
+      var card = e.target.closest(".story-card");
+      if (!card) return;
+      if (e.target.closest("a")) return;
       e.preventDefault();
-      var card = a.closest(".story-card");
-      var id = card && card.getAttribute("data-story-id");
+      var id = card.getAttribute("data-story-id");
       if (id) { open(id); card.classList.remove("unread"); }
     });
-  });
+
+    grid.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      var card = e.target.closest(".story-card");
+      if (!card) return;
+      if (e.target.closest("a") || e.target.closest(".read-btn")) return;
+      e.preventDefault();
+      var id = card.getAttribute("data-story-id");
+      if (id) { open(id); card.classList.remove("unread"); }
+    });
+  }
 
   overlay.addEventListener("click", function (e) { if (e.target === overlay) close(); });
   document.addEventListener("keydown", function (e) {
@@ -805,6 +786,86 @@ document.getElementById("themeToggle").addEventListener("click", function () {
   var initial = new URLSearchParams(window.location.search).get("story");
   if (initial) open(initial);
 })();
+
+(function () {
+  var grid = document.getElementById("storyGrid");
+  var loader = document.getElementById("infiniteLoader");
+  if (!grid || !loader) return;
+
+  var loading = false;
+  var hasMore = loader.getAttribute("data-has-more") === "1";
+  var nextPage = parseInt(loader.getAttribute("data-next-page") || "2", 10);
+
+  function nextUrl() {
+    var params = new URLSearchParams(window.location.search);
+    params.delete("story");
+    params.set("partial", "1");
+    params.set("page", String(nextPage));
+    return "/digest?" + params.toString();
+  }
+
+  function finish(message, done) {
+    loader.textContent = message;
+    if (done) {
+      loader.setAttribute("hidden", "");
+      if (observer) observer.disconnect();
+    }
+  }
+
+  function loadMore() {
+    if (loading || !hasMore) return;
+    loading = true;
+    loader.removeAttribute("hidden");
+    loader.textContent = "Loading more stories…";
+
+    fetch(nextUrl(), { headers: { "X-Requested-With": "fetch" } })
+      .then(function (r) {
+        if (!r.ok) throw new Error("Could not load more stories");
+        return r.text();
+      })
+      .then(function (html) {
+        var tmp = document.createElement("div");
+        tmp.innerHTML = html.trim();
+        var payload = tmp.firstElementChild;
+        if (!payload) throw new Error("Empty response");
+
+        var cards = Array.prototype.slice.call(payload.querySelectorAll(".story-card"));
+        cards.forEach(function (card) { grid.appendChild(card); });
+
+        hasMore = payload.getAttribute("data-has-more") === "1";
+        nextPage = parseInt(payload.getAttribute("data-page") || String(nextPage), 10) + 1;
+        loader.setAttribute("data-next-page", String(nextPage));
+        loader.setAttribute("data-has-more", hasMore ? "1" : "0");
+
+        if (!hasMore) finish("", true);
+      })
+      .catch(function (err) {
+        loader.textContent = err.message || "Could not load more stories";
+      })
+      .finally(function () {
+        loading = false;
+      });
+  }
+
+  if (!hasMore) {
+    loader.setAttribute("hidden", "");
+    return;
+  }
+
+  var observer = null;
+  if ("IntersectionObserver" in window) {
+    observer = new IntersectionObserver(function (entries) {
+      if (entries.some(function (entry) { return entry.isIntersecting; })) loadMore();
+    }, { rootMargin: "900px 0px" });
+    observer.observe(loader);
+  } else {
+    window.addEventListener("scroll", function () {
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 900) loadMore();
+    });
+    loadMore();
+  }
+})();
+
 
 (function () {
   var btn = document.getElementById("syncNowBtn");
