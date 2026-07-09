@@ -282,3 +282,13 @@ python -m ingest.social_scraper --all
 python -m ingest.youtube_sync
 flask --app app run --host 127.0.0.1 --port 5000
 ```
+
+## Testing
+
+```bash
+pytest tests/
+```
+
+Unit tests cover the Gemini fallback/rotation logic, translation-detection
+heuristics, and the retry-on-failure behavior for email/story ingestion. No
+network calls or credentials required — LLM clients are faked.
