@@ -73,3 +73,6 @@ GMAIL_CREDENTIALS_PATH = _path_env(
     "GMAIL_CREDENTIALS_PATH", HERE / "state" / "credentials.json"
 )
 GMAIL_TOKEN_PATH = _path_env("GMAIL_TOKEN_PATH", HERE / "state" / "token.json")
+SENDER_SIGNALS_PATH = _path_env(
+    "SENDER_SIGNALS_PATH", HERE / "state" / "sender_signals.json"
+)

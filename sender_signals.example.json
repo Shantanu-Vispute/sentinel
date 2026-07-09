@@ -1,0 +1,20 @@
+{
+  "trusted_early_ai": {
+    "example ai newsletter": 2.0
+  },
+  "scout_ai": {
+    "another ai newsletter": 0.8
+  },
+  "supporting_ai": {
+    "occasional ai newsletter": 0.3
+  },
+  "noisy_fast": [
+    "high-volume general newsletter"
+  ],
+  "dev_lane": [
+    "javascript weekly"
+  ],
+  "item_feed": [
+    "huggingface"
+  ]
+}

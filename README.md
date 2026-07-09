@@ -60,9 +60,20 @@ TELEGRAM_CHANNELS=channel_one,channel_two
 GMAIL_CREDENTIALS_PATH=state/credentials.json
 GMAIL_TOKEN_PATH=state/token.json
 STORIES_DB=state/stories.db
+SENDER_SIGNALS_PATH=state/sender_signals.json
 ```
 
 Everything under `state/` is local runtime data and is intentionally ignored by git.
+
+## Sender trust signals
+
+Digest ranking can optionally boost or penalize stories based on which
+newsletter sent them (e.g. treat a known AI-focused newsletter as more
+trustworthy than a general tech roundup). This is a personal preference, so
+it isn't shipped with any default opinions — copy `sender_signals.example.json`
+to the path in `SENDER_SIGNALS_PATH` (default `state/sender_signals.json`,
+which is gitignored) and fill in your own senders and weights. If the file
+is missing, all senders are treated as neutral.
 
 ## Platform Login
 

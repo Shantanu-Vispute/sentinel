@@ -17,6 +17,7 @@ from config import STORIES_DB
 from digest.media_cache import media_file_path
 from digest.gmail_auth import get_gmail_service
 from digest.gmail_fetcher import fetch_newsletter_by_id, message_id_from_gmail_url, normalize_email_text
+from digest.sender_signal import sender_signal_for_story
 
 HERE = pathlib.Path(__file__).resolve().parent
 STORIES_DB_PATH = pathlib.Path(STORIES_DB)
@@ -705,6 +706,12 @@ def digest_list():
                 unique_senders.append(key)
         story["senders"] = unique_senders
         story["distinct_sender_count"] = len(unique_senders)
+        sender_signal = sender_signal_for_story(unique_senders, source_type=source_type)
+        story["sender_signal_score"] = sender_signal.score
+        story["sender_signal_label"] = sender_signal.label
+        story["trusted_early_sender_count"] = sender_signal.trusted_early_count
+        story["noisy_fast_sender_count"] = sender_signal.noisy_fast_count
+        story["dev_lane_sender_count"] = sender_signal.dev_lane_count
         raw_source_types = mention_sources_by_story.get(row["id"], [])
         if raw_source_types:
             story["distinct_source_types"] = sorted(set(raw_source_types))
@@ -729,6 +736,11 @@ def digest_list():
         story["source_label"] = _source_label(story["source_type"])
         story["distinct_sender_count"] = len(story.get("senders", []))
         story["distinct_source_types"] = [story["source_type"]]
+        story["sender_signal_score"] = 0.0
+        story["sender_signal_label"] = ""
+        story["trusted_early_sender_count"] = 0
+        story["noisy_fast_sender_count"] = 0
+        story["dev_lane_sender_count"] = 0
         all_stories.append(story)
 
     source_counts = [
