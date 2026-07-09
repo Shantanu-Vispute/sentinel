@@ -2,6 +2,7 @@ from digest.gmail_auth import get_gmail_service
 from config import MAX_FETCH_RESULTS, SIMILARITY_THRESHOLD
 import digest.llm_client as llm_client
 from digest.media_cache import cache_remote_image
+from digest.pii import scrub_pii
 from digest.storage import StoryDB
 from digest.story_extractor import extract_stories
 from digest.story_quality import assess_story_quality
@@ -370,7 +371,9 @@ def process_telegram_posts(since: datetime | None = None):
             db.mark_email_processed(post.id)
             continue
 
-        chash = _tg_content_hash(post.text)
+        post_text = scrub_pii(post.text)
+
+        chash = _tg_content_hash(post_text)
         if chash:
             dup_id = db.find_by_content_hash(chash)
             if dup_id:
@@ -381,15 +384,15 @@ def process_telegram_posts(since: datetime | None = None):
                 continue
 
         from digest.translator import needs_translation, translate as _translate_fn
-        if needs_translation(post.text):
-            translated = _translate_fn(post.text)
+        if needs_translation(post_text):
+            translated = _translate_fn(post_text)
             if translated is None:
                 print(f"      translation failed — leaving for next run")
                 continue
             print(
-                f"      translated ({len(post.text)} → {len(translated)} chars)")
+                f"      translated ({len(post_text)} → {len(translated)} chars)")
         else:
-            translated = post.text
+            translated = post_text
 
         story = _tg_post_to_story(post, translated)
         quality = assess_story_quality(

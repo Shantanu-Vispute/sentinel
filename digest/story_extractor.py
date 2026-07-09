@@ -2,8 +2,8 @@ import json
 import time
 import re
 from dataclasses import dataclass
-from config import SENTINEL_PII_PATTERNS
 from digest.gmail_fetcher import Newsletter
+from digest.pii import scrub_pii
 import digest.llm_client as llm_client
 
 _PROMO_SUBJECT_PATTERNS = re.compile(
@@ -37,17 +37,6 @@ def _is_tool_directory_digest(newsletter: Newsletter) -> bool:
     has_tool_subject = "tools" in subject or "libraries" in subject
     has_directory_marker = any(marker in body_head for marker in tool_directory_markers)
     return has_tool_subject and has_directory_marker
-
-_PII_PATTERNS = [
-    re.compile(pattern.strip(), re.IGNORECASE)
-    for pattern in SENTINEL_PII_PATTERNS
-    if pattern.strip()
-]
-
-def _scrub_pii(text: str) -> str:
-    for pattern in _PII_PATTERNS:
-        text = pattern.sub('[REDACTED]', text)
-    return text
 
 SYSTEM_PROMPT = """You are a newsletter story extractor.
 
@@ -207,7 +196,7 @@ def extract_stories(newsletters: list[Newsletter]) -> list[Story]:
     return all_stories
 
 def _extract_from_single(newsletter: Newsletter) -> list[Story]:
-    clean_text = _scrub_pii(_strip_urls(newsletter.body))
+    clean_text = scrub_pii(_strip_urls(newsletter.body))
 
     prompt = (
         f"Classify this email first, then extract stories using the matching rule.\n"
@@ -215,8 +204,8 @@ def _extract_from_single(newsletter: Newsletter) -> list[Story]:
         f"content_type=single_article for one article/essay/recap/tutorial, and "
         f"content_type=promotional when there is no extractable news story.\n\n"
         f"Use only facts from the text below. Do not invent or add background details.\n\n"
-        f"Newsletter: {_scrub_pii(newsletter.subject)}\n"
-        f"From: {_scrub_pii(newsletter.sender)}\n"
+        f"Newsletter: {scrub_pii(newsletter.subject)}\n"
+        f"From: {scrub_pii(newsletter.sender)}\n"
         f"Date: {newsletter.date}\n\n"
         f"Content:\n{clean_text}"
     )
