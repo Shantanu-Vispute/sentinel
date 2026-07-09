@@ -19,6 +19,25 @@ def _is_promotional(newsletter: Newsletter) -> bool:
         return True
     return False
 
+def _is_tool_directory_digest(newsletter: Newsletter) -> bool:
+    sender = (newsletter.sender or "").lower()
+    subject = (newsletter.subject or "").lower()
+    body_head = (newsletter.body or "")[:2500].lower()
+
+    if "web tools weekly" in sender or "web tools weekly" in body_head:
+        return True
+
+    tool_directory_markers = (
+        "tools for web developers",
+        "javascript libraries & frameworks",
+        "react tools",
+        "uncategorized tools",
+        "developer tools",
+    )
+    has_tool_subject = "tools" in subject or "libraries" in subject
+    has_directory_marker = any(marker in body_head for marker in tool_directory_markers)
+    return has_tool_subject and has_directory_marker
+
 _PII_PATTERNS = [
     re.compile(pattern.strip(), re.IGNORECASE)
     for pattern in SENTINEL_PII_PATTERNS
@@ -46,11 +65,19 @@ curated_digest:
 - Multiple independent news items, launches, papers, tools, funding events, policy updates,
   or links are bundled together.
 - Examples: "today's top stories", "5 things happening this week", roundup newsletters,
-  link digests, tools/papers sections about external products or projects.
+  link digests, and papers sections about external projects.
 - Extract one story per independent item.
-- Include main stories, secondary headlines, "other news", tools, products, papers,
-  and reports when they are external/newsworthy.
-- For headline-only items, use the headline text as the summary. Do not add details.
+- Include main stories, secondary headlines, "other news", papers, and reports when
+  they are external/newsworthy.
+- Do not extract generic tool directories, library lists, component lists, resource
+  roundups, or "tools for developers" sections as story cards. Only include a tool
+  or product when the email frames it as substantial news: a major launch, funding,
+  acquisition, shutdown, security incident, policy change, or notable company update.
+- Skip headline-only items unless the item is a major AI model, AI policy, AI security,
+  AI company, or AI infrastructure story with enough explicit detail in the text.
+- Skip generic tutorials, prompt lists, courses, UI updates, JS/TS/framework/library
+  releases, and tool announcements unless the item is a security incident, acquisition,
+  funding event, shutdown, major policy change, or substantial AI research/model release.
 - Never create one generic story for a whole section such as "Other news",
   "Other news & articles", "Trending tools", or "Trending papers & reports".
   Split those sections into specific item-level stories when each item has enough
@@ -84,6 +111,7 @@ NEVER extract these as stories:
 - "Advertise with us" / "reach N,000 readers" sections.
 - Account summaries, balance notifications, financial transaction emails.
 - Course listings or resource directories that are clearly the newsletter's own offerings.
+- Generic tool/library/component/resource listings from emails such as Web Tools Weekly.
 - Countdown offers, "last chance" reminders, or discount CTAs.
 
 Strict rules:
@@ -141,6 +169,10 @@ def extract_stories(newsletters: list[Newsletter]) -> list[Story]:
 
         if _is_promotional(newsletter):
             print(f"    SKIP:    Promotional/transactional email, skipping")
+            skipped += 1
+            continue
+        if _is_tool_directory_digest(newsletter):
+            print(f"    SKIP:    Tool/resource directory email, skipping")
             skipped += 1
             continue
 

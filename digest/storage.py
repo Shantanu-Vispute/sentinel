@@ -228,6 +228,13 @@ class StoryDB:
         )
         self.conn.commit()
 
+    def update_story_title(self, story_id: str, new_title: str):
+        self.conn.execute(
+            "UPDATE stories SET title = ? WHERE id = ?",
+            (new_title, story_id),
+        )
+        self.conn.commit()
+
     def add_timeline_entry(
             self,
             story_id: str,

@@ -4,6 +4,7 @@ import digest.llm_client as llm_client
 from digest.media_cache import cache_remote_image
 from digest.storage import StoryDB
 from digest.story_extractor import extract_stories
+from digest.story_quality import assess_story_quality
 from digest.gmail_fetcher import fetch_newsletters
 import fcntl
 import json
@@ -42,6 +43,7 @@ def _release_lock():
 NEW_INFO_PROMPT = """\
 You are checking if a new news report is about the same topic as an existing story AND adds new information.
 
+Existing story title: {existing_title}
 Existing story summary:
     {existing_summary}
 
@@ -60,13 +62,21 @@ Answer with JSON only:
     {{
   "adds_new_info": true/false,
   "what_changed": "one sentence describing what is new, or empty string if nothing new or different topic",
+  "updated_title": "if adds_new_info is true and the existing title is stale or less precise: a concise canonical title for the same story. Keep empty if no title change is needed, or if a better title would broaden the story into an umbrella topic.",
   "updated_summary": "if adds_new_info is true: a clean 2-4 sentence summary that rewrites the existing summary to incorporate the new information naturally. If adds_new_info is false: empty string."
 }}
 
+The updated_title must still describe the same specific story, not a wider product family,
+company theme, event recap, or related-story bundle.
 The updated_summary must read as a single coherent paragraph — do NOT concatenate or append sentences."""
 
-def _check_new_info(existing_summary: str, new_title: str, new_summary: str) -> tuple[bool, str, str]:
+def _check_new_info(
+        existing_title: str,
+        existing_summary: str,
+        new_title: str,
+        new_summary: str) -> tuple[bool, str, str, str]:
     prompt = NEW_INFO_PROMPT.format(
+        existing_title=existing_title,
         existing_summary=existing_summary,
         new_title=new_title,
         new_summary=new_summary,
@@ -76,9 +86,10 @@ def _check_new_info(existing_summary: str, new_title: str, new_summary: str) -> 
         "properties": {
             "adds_new_info": {"type": "boolean"},
             "what_changed": {"type": "string"},
+            "updated_title": {"type": "string"},
             "updated_summary": {"type": "string"},
         },
-        "required": ["adds_new_info", "what_changed", "updated_summary"],
+        "required": ["adds_new_info", "what_changed", "updated_title", "updated_summary"],
     }
     try:
         response = llm_client.chat(
@@ -89,12 +100,13 @@ def _check_new_info(existing_summary: str, new_title: str, new_summary: str) -> 
         result = json.loads(raw)
         adds_new_info = result.get("adds_new_info", False)
         what_changed = result.get("what_changed", "")
+        updated_title = result.get("updated_title", "")
         updated_summary = result.get("updated_summary", "")
 
-        return adds_new_info, what_changed, updated_summary
+        return adds_new_info, what_changed, updated_title, updated_summary
     except Exception as e:
         print(f"        WARN: new-info check failed: {e}")
-        return False, "", ""
+        return False, "", "", ""
 
 def _check_backends() -> bool:
     checks = llm_client.get_llm_client().healthcheck()
@@ -117,6 +129,16 @@ def _persist_story(
         evolved_count,
         source_type: str = "email",
         skip_new_info_check: bool = False):
+    quality = assess_story_quality(
+        story.title,
+        story.summary,
+        source_type=source_type,
+        sender=story.source_sender,
+    )
+    if quality.should_skip_ingestion:
+        print(f"      SKIP: {quality.reason}")
+        return new_count, merged_count, evolved_count
+
     try:
         emb_resp = llm_client.embed(
             input_text=f"{
@@ -133,10 +155,11 @@ def _persist_story(
         existing = db.get_story(existing_id)
         adds_new_info = False
         what_changed = ""
+        updated_title = ""
         updated_summary = ""
         if not skip_new_info_check and existing and existing["mention_count"] >= 2:
-            adds_new_info, what_changed, updated_summary = _check_new_info(
-                existing["summary"], story.title, story.summary,
+            adds_new_info, what_changed, updated_title, updated_summary = _check_new_info(
+                existing["title"], existing["summary"], story.title, story.summary,
             )
 
         db.add_mention(
@@ -156,6 +179,9 @@ def _persist_story(
             new_summary = updated_summary if updated_summary else f"{
                 existing['summary']} {what_changed}"
             db.update_story_summary(existing_id, new_summary.strip())
+            updated_title = (updated_title or "").strip()
+            if updated_title and updated_title != existing.get("title"):
+                db.update_story_title(existing_id, updated_title)
             db.add_timeline_entry(
                 story_id=existing_id,
                 date=story.date,
@@ -366,6 +392,17 @@ def process_telegram_posts(since: datetime | None = None):
             translated = post.text
 
         story = _tg_post_to_story(post, translated)
+        quality = assess_story_quality(
+            story.title,
+            story.summary,
+            source_type="telegram",
+            sender=story.source_sender,
+        )
+        if quality.should_skip_ingestion:
+            print(f"      SKIP: {quality.reason}")
+            db.mark_email_processed(post.id)
+            continue
+
         primary_image = ""
         if post.images:
             primary_image = post.images[0]
