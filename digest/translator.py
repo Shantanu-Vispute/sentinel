@@ -1,11 +1,10 @@
 import re
+import unicodedata
 from typing import Optional
 
 import digest.llm_client as llm_client
 
 _URL_RE = re.compile(r"https?://\S+")
-_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
-_LATIN_RE = re.compile(r"[A-Za-z]")
 
 _PROMPT = (
     "Translate the following text to English. Preserve the original line breaks, "
@@ -14,15 +13,24 @@ _PROMPT = (
 
 def needs_translation(
         text: str,
-        cyrillic_ratio_threshold: float = 0.15) -> bool:
+        non_latin_ratio_threshold: float = 0.15) -> bool:
+    """True if enough alphabetic characters are outside the Latin script to warrant translation."""
     if not text or not text.strip():
         return False
-    cyr = len(_CYRILLIC_RE.findall(text))
-    lat = len(_LATIN_RE.findall(text))
-    total = cyr + lat
+    latin = 0
+    non_latin = 0
+    for ch in text:
+        if not ch.isalpha():
+            continue
+        name = unicodedata.name(ch, "")
+        if name.startswith("LATIN"):
+            latin += 1
+        else:
+            non_latin += 1
+    total = latin + non_latin
     if total == 0:
         return False
-    return (cyr / total) >= cyrillic_ratio_threshold
+    return (non_latin / total) >= non_latin_ratio_threshold
 
 def _mask_urls(text: str) -> tuple[str, list[str]]:
     urls: list[str] = []
