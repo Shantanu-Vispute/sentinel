@@ -1,5 +1,7 @@
 state/
 digests/
+local/
+*.log
 .env
 .env.*
 !.env.example
