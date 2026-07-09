@@ -138,7 +138,7 @@ def _persist_story(
     )
     if quality.should_skip_ingestion:
         print(f"      SKIP: {quality.reason}")
-        return new_count, merged_count, evolved_count
+        return new_count, merged_count, evolved_count, True
 
     try:
         emb_resp = llm_client.embed(
@@ -148,7 +148,7 @@ def _persist_story(
         embedding = emb_resp.embeddings[0]
     except Exception as e:
         print(f"      WARN: embed failed: {e}")
-        return new_count, merged_count, evolved_count
+        return new_count, merged_count, evolved_count, False
 
     existing_id = db.find_similar(embedding, threshold=SIMILARITY_THRESHOLD)
 
@@ -217,7 +217,7 @@ def _persist_story(
         new_count += 1
         print(f"      → NEW [{story_id[:8]}]")
 
-    return new_count, merged_count, evolved_count
+    return new_count, merged_count, evolved_count, True
 
 def process_new_emails(max_results: int = 50, since: datetime | None = None):
     print("=" * 60)
@@ -260,18 +260,26 @@ def process_new_emails(max_results: int = 50, since: datetime | None = None):
     for ei, newsletter in enumerate(newsletters, 1):
         print(f"\n  ── [{ei}/{len(newsletters)}] {newsletter.subject[:65]}")
 
-        email_stories = extract_stories([newsletter])
+        email_stories, extraction_failed = extract_stories([newsletter])
+        if extraction_failed:
+            print(f"      extraction failed — leaving for next run")
+            continue
         if not email_stories:
             db.mark_email_processed(newsletter.id)
             continue
 
+        persist_ok = True
         for story in email_stories:
             print(f"    · {story.title[:65]}...")
-            new_count, merged_count, evolved_count = _persist_story(
+            new_count, merged_count, evolved_count, ok = _persist_story(
                 db, story, new_count, merged_count, evolved_count
             )
+            persist_ok = persist_ok and ok
 
-        db.mark_email_processed(newsletter.id)
+        if persist_ok:
+            db.mark_email_processed(newsletter.id)
+        else:
+            print(f"      one or more stories failed to persist — leaving for next run")
 
     print(f"\n[3/3] Done")
     print(f"      New stories:    {new_count}")

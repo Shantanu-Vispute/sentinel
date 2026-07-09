@@ -38,6 +38,7 @@ def _is_tool_directory_digest(newsletter: Newsletter) -> bool:
     has_directory_marker = any(marker in body_head for marker in tool_directory_markers)
     return has_tool_subject and has_directory_marker
 
+
 SYSTEM_PROMPT = """You are a newsletter story extractor.
 
 Return JSON only with this schema:
@@ -143,11 +144,16 @@ def _strip_urls(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
-def extract_stories(newsletters: list[Newsletter]) -> list[Story]:
+def extract_stories(newsletters: list[Newsletter]) -> tuple[list[Story], bool]:
+    """Returns (stories, failed). `failed` is True if any newsletter's extraction
+    raised (e.g. an LLM/quota error) rather than being cleanly skipped or genuinely
+    empty — callers should not mark a failed newsletter as processed, so it's
+    retried on the next run instead of silently losing its content."""
     all_stories = []
     total_time = 0
 
     skipped = 0
+    failed = False
     for i, newsletter in enumerate(newsletters):
         print(
             f"\n  [{i + 1}/{len(newsletters)}] Processing: {newsletter.subject}")
@@ -186,6 +192,7 @@ def extract_stories(newsletters: list[Newsletter]) -> list[Story]:
             elapsed = time.time() - start
             total_time += elapsed
             print(f"    ERROR:   {e} ({elapsed:.1f}s)")
+            failed = True
 
     processed = len(newsletters) - skipped
     print(
@@ -193,7 +200,7 @@ def extract_stories(newsletters: list[Newsletter]) -> list[Story]:
         f"({skipped} skipped as promotional) ({total_time:.1f}s total)"
     )
 
-    return all_stories
+    return all_stories, failed
 
 def _extract_from_single(newsletter: Newsletter) -> list[Story]:
     clean_text = scrub_pii(_strip_urls(newsletter.body))
