@@ -61,6 +61,7 @@ GMAIL_CREDENTIALS_PATH=state/credentials.json
 GMAIL_TOKEN_PATH=state/token.json
 STORIES_DB=state/stories.db
 SENDER_SIGNALS_PATH=state/sender_signals.json
+BESTBLOGS_API_BASE=https://www.bestblogs.dev/api/proxy
 ```
 
 Everything under `state/` is local runtime data and is intentionally ignored by git.
@@ -74,6 +75,23 @@ it isn't shipped with any default opinions — copy `sender_signals.example.json
 to the path in `SENDER_SIGNALS_PATH` (default `state/sender_signals.json`,
 which is gitignored) and fill in your own senders and weights. If the file
 is missing, all senders are treated as neutral.
+
+## Explore
+
+The `/explore` page reads BestBlogs through Sentinel's backend proxy:
+
+```bash
+/api/explore/resources?page=1&pageSize=10&timeFilter=1w&language=all&category=ai&sort=time_desc&type=ARTICLE
+```
+
+Sentinel maps UI-friendly values to the BestBlogs API:
+
+```text
+category=ai          -> category=Artificial_Intelligence
+sort=time_desc       -> sortType=time_desc
+type=article         -> type=ARTICLE
+sourceid=653b2e      -> sourceId=SOURCE_653b2e
+```
 
 ## Platform Login
 
