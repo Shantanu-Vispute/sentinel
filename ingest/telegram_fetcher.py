@@ -4,11 +4,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
-import requests
-from bs4 import BeautifulSoup
+from telethon.sync import TelegramClient
+from telethon.tl.types import MessageEntityTextUrl, MessageEntityUrl
 
-_UA = "Mozilla/5.0 (Sentinel telegram_fetcher)"
-_BG_URL_RE = re.compile(r"background-image:\s*url\(['\"]?([^'\")]+)")
+from digest.media_cache import cache_bytes
+
 _ERID_RE = re.compile(r"(?:[?&]|&amp;)erid=", re.IGNORECASE)
 
 @dataclass
@@ -37,150 +37,145 @@ def _clean_link(href: str, channel: str) -> str | None:
         return None
     return href
 
-def _extract_images(post_el) -> list[str]:
-    out = []
-    for ph in post_el.select(".tgme_widget_message_photo_wrap"):
-        style = ph.get("style", "")
-        m = _BG_URL_RE.search(style)
-        if m:
-            out.append(m.group(1))
-    return out
+def _client() -> TelegramClient:
+    from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION_PATH
 
-def _extract_video_thumbs(post_el) -> list[str]:
-    out = []
-    for v in post_el.select(
-        ".tgme_widget_message_video_thumb, .tgme_widget_message_video_wrap"
-    ):
-        style = v.get("style", "")
-        m = _BG_URL_RE.search(style)
-        if m:
-            out.append(m.group(1))
-    return out
+    if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
+        raise RuntimeError(
+            "TELEGRAM_API_ID / TELEGRAM_API_HASH not set. Get them from "
+            "https://my.telegram.org and add them to .env."
+        )
+    client = TelegramClient(TELEGRAM_SESSION_PATH, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+    client.connect()
+    if not client.is_user_authorized():
+        client.disconnect()
+        raise RuntimeError(
+            "Telegram session not authorized. Run "
+            "`python scripts/telegram-login.py` once to log in interactively."
+        )
+    return client
 
-def _parse_page(html: str, channel: str) -> list["TelegramPost"]:
-    soup = BeautifulSoup(html, "html.parser")
+def _is_video_document(document) -> bool:
+    return any(
+        attr.__class__.__name__ == "DocumentAttributeVideo"
+        for attr in (document.attributes or [])
+    )
+
+def _extract_links(message, channel: str) -> list[str]:
+    links: list[str] = []
+    for entity, text_piece in message.get_entities_text() or []:
+        href = None
+        if isinstance(entity, MessageEntityTextUrl):
+            href = entity.url
+        elif isinstance(entity, MessageEntityUrl):
+            href = text_piece
+        cleaned = _clean_link(href, channel) if href else None
+        if cleaned and cleaned not in links:
+            links.append(cleaned)
+
+    webpage = getattr(getattr(message, "media", None), "webpage", None)
+    webpage_url = getattr(webpage, "url", None)
+    if webpage_url:
+        cleaned = _clean_link(webpage_url, channel)
+        if cleaned and cleaned not in links:
+            links.insert(0, cleaned)
+    return links
+
+def _cache_message_media(client, channel: str, message, thumb=None) -> str:
+    try:
+        data = client.download_media(message, file=bytes, thumb=thumb)
+    except Exception:
+        return ""
+    if not data:
+        return ""
+    key = f"tg:{channel}:{message.id}:{'thumb' if thumb is not None else 'photo'}"
+    return cache_bytes(data, key=key, namespace="telegram", ext=".jpg")
+
+def _message_to_post(client, channel: str, message) -> "TelegramPost | None":
+    if message is None or message.action is not None:
+        return None
+    text = (message.raw_text or "").strip()
+    if not text and not message.media:
+        return None
+
+    links = _extract_links(message, channel)
+    is_sponsored = any(_ERID_RE.search(link) for link in links)
+    unique_hosts = set()
+    for link in links:
+        host = urlsplit(link).netloc.lower().removeprefix("www.")
+        if host and host not in ("x.com", "twitter.com"):
+            unique_hosts.add(host)
+    is_digest = len(unique_hosts) >= 3
+
+    images: list[str] = []
+    video_thumbs: list[str] = []
+    if message.photo:
+        cached = _cache_message_media(client, channel, message)
+        if cached:
+            images.append(cached)
+    elif message.video or (message.document and _is_video_document(message.document)):
+        cached = _cache_message_media(client, channel, message, thumb=-1)
+        if cached:
+            video_thumbs.append(cached)
+
+    return TelegramPost(
+        id=f"tg:{channel}:{message.id}",
+        channel=channel,
+        msg_id=message.id,
+        url=f"https://t.me/{channel}/{message.id}",
+        date=message.date.astimezone(timezone.utc).isoformat(),
+        text=text,
+        links=links,
+        images=images,
+        video_thumbs=video_thumbs,
+        is_sponsored=is_sponsored,
+        is_digest=is_digest,
+    )
+
+def _fetch_channel_posts(
+        client: TelegramClient,
+        channel: str,
+        since: datetime | None = None,
+        max_pages: int = 20) -> list[TelegramPost]:
+    # Routine polls (since=None) only need the latest page, like the old scraper's
+    # first-page-then-stop behavior. Only paginate deeper for explicit backfills.
+    limit = min(max_pages * 20, 3000) if since else 20
     posts: list[TelegramPost] = []
-    for wrap in soup.select(".tgme_widget_message_wrap"):
-        date_el = wrap.select_one(".tgme_widget_message_date")
-        if not date_el:
-            continue
-        msg_url = date_el.get("href", "")
-
-        parts = urlsplit(msg_url).path.strip("/").split("/")
-        if len(parts) < 2 or not parts[-1].isdigit():
-            continue
-        msg_id = int(parts[-1])
-
-        time_el = wrap.select_one("time[datetime]")
-        iso_date = time_el["datetime"] if time_el else datetime.now(
-            timezone.utc).isoformat()
-
-        text_el = wrap.select_one(".tgme_widget_message_text")
-        text = text_el.get_text(separator="\n", strip=True) if text_el else ""
-
-        links: list[str] = []
-        if text_el:
-            for a in text_el.select("a[href]"):
-                cleaned = _clean_link(a["href"], channel)
-                if cleaned and cleaned not in links:
-                    links.append(cleaned)
-
-        lp = wrap.select_one(".tgme_widget_message_link_preview[href]")
-        if lp:
-            cleaned = _clean_link(lp["href"], channel)
-            if cleaned and cleaned not in links:
-                links.insert(0, cleaned)
-
-        images = _extract_images(wrap)
-        video_thumbs = _extract_video_thumbs(wrap)
-
-        is_sponsored = any(_ERID_RE.search(l) for l in links)
-
-        unique_hosts = set()
-        for l in links:
-            host = urlsplit(l).netloc.lower().removeprefix("www.")
-            if host and host not in ("x.com", "twitter.com"):
-                unique_hosts.add(host)
-        is_digest = len(unique_hosts) >= 3
-
-        posts.append(TelegramPost(
-            id=f"tg:{channel}:{msg_id}",
-            channel=channel,
-            msg_id=msg_id,
-            url=msg_url,
-            date=iso_date,
-            text=text,
-            links=links,
-            images=images,
-            video_thumbs=video_thumbs,
-            is_sponsored=is_sponsored,
-            is_digest=is_digest,
-        ))
+    for message in client.iter_messages(channel, limit=limit):
+        if since and message.date < since:
+            break
+        post = _message_to_post(client, channel, message)
+        if post is not None:
+            posts.append(post)
+    posts.reverse()
     return posts
 
 def fetch_channel(
         channel: str,
         since: datetime | None = None,
-        max_pages: int = 20,
-        timeout: int = 15) -> list[TelegramPost]:
-    base_url = f"https://t.me/s/{channel}"
-    all_posts: list[TelegramPost] = []
-    seen_ids: set[int] = set()
-    before: int | None = None
-
-    for page_idx in range(max_pages):
-        url = base_url if before is None else f"{base_url}?before={before}"
-        r = requests.get(url, timeout=timeout, headers={"User-Agent": _UA})
-        r.raise_for_status()
-        page_posts = _parse_page(r.text, channel)
-        if not page_posts:
-            break
-
-        new_this_page = [p for p in page_posts if p.msg_id not in seen_ids]
-        if not new_this_page:
-            break
-        for p in new_this_page:
-            seen_ids.add(p.msg_id)
-        all_posts.extend(new_this_page)
-
-        oldest = min(page_posts, key=lambda p: p.msg_id)
-
-        if since:
-            try:
-                oldest_dt = datetime.fromisoformat(oldest.date)
-                if oldest_dt < since:
-                    break
-            except Exception:
-                pass
-        else:
-            break
-
-        before = oldest.msg_id
-        time.sleep(0.8)
-
-    if since:
-        filtered = []
-        for p in all_posts:
-            try:
-                if datetime.fromisoformat(p.date) >= since:
-                    filtered.append(p)
-            except Exception:
-                filtered.append(p)
-        return filtered
-    return all_posts
+        max_pages: int = 20) -> list[TelegramPost]:
+    client = _client()
+    try:
+        return _fetch_channel_posts(client, channel, since=since, max_pages=max_pages)
+    finally:
+        client.disconnect()
 
 def fetch_channels(channels: list[str], since: datetime | None = None,
                    delay_seconds: float = 1.0) -> list[TelegramPost]:
     all_posts = []
-    for i, ch in enumerate(channels):
-        try:
-            posts = fetch_channel(ch, since=since)
-            print(f"  @{ch}: {len(posts)} posts")
-            all_posts.extend(posts)
-        except Exception as e:
-            print(f"  @{ch}: ERROR {e}")
-        if i < len(channels) - 1:
-            time.sleep(delay_seconds)
+    client = _client()
+    try:
+        for i, ch in enumerate(channels):
+            try:
+                posts = _fetch_channel_posts(client, ch, since=since)
+                print(f"  @{ch}: {len(posts)} posts")
+                all_posts.extend(posts)
+            except Exception as e:
+                print(f"  @{ch}: ERROR {e}")
+            if i < len(channels) - 1:
+                time.sleep(delay_seconds)
+    finally:
+        client.disconnect()
     return all_posts
 
 if __name__ == "__main__":

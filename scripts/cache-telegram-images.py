@@ -14,11 +14,31 @@ sys.path.insert(0, str(ROOT))
 
 from config import STORIES_DB
 from digest.media_cache import cache_remote_image, is_local_media_url, remote_host
-from ingest.telegram_fetcher import _extract_images, _extract_video_thumbs
 
 
 TG_URL_RE = re.compile(r"https?://t\.me/([^/\s]+)/(\d+)")
+BG_URL_RE = re.compile(r"background-image:\s*url\(['\"]?([^'\")]+)")
 UA = "Mozilla/5.0 (Sentinel telegram image repair)"
+
+
+def _extract_images(post_el) -> list[str]:
+    out = []
+    for ph in post_el.select(".tgme_widget_message_photo_wrap"):
+        m = BG_URL_RE.search(ph.get("style", ""))
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def _extract_video_thumbs(post_el) -> list[str]:
+    out = []
+    for v in post_el.select(
+        ".tgme_widget_message_video_thumb, .tgme_widget_message_video_wrap"
+    ):
+        m = BG_URL_RE.search(v.get("style", ""))
+        if m:
+            out.append(m.group(1))
+    return out
 
 
 def _message_media_url(tg_url: str) -> str:

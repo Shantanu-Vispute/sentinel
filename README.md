@@ -95,7 +95,31 @@ Later runs reuse the saved token.
 
 ### Telegram
 
-Telegram uses public web pages, so no login is needed. Add public channel handles to `.env` without `@`:
+Sentinel reads Telegram as your logged-in user account (via
+[Telethon](https://codeberg.org/Lonami/Telethon)), so it can pull full
+message history — including images and video thumbnails — from any
+channel you're a member of, not just what's on the public web preview.
+
+Get an `api_id`/`api_hash` from https://my.telegram.org (API Development
+tools) and add them to `.env`:
+
+```bash
+TELEGRAM_API_ID=your_telegram_api_id
+TELEGRAM_API_HASH=your_telegram_api_hash
+TELEGRAM_SESSION_PATH=state/telegram
+```
+
+Log in once, interactively (never run this from cron):
+
+```bash
+python scripts/telegram-login.py
+```
+
+It asks for your phone number, the login code Telegram sends you, and your
+2FA password if you have one, then saves a session file at
+`TELEGRAM_SESSION_PATH` and lists the channels/groups you're in so you can
+copy handles into `TELEGRAM_CHANNELS`. Later runs reuse the saved session
+without prompting again.
 
 ```bash
 TELEGRAM_CHANNELS=channel_one,channel_two
@@ -112,6 +136,10 @@ Backfill from a date:
 ```bash
 python -m digest.daemon --telegram --telegram-since 2026-04-01
 ```
+
+This is a self-bot-style automation acting as your real account, which
+Telegram's ToS technically restricts — be aware of that, even though
+read-only scraping of channels you're already in is low risk in practice.
 
 ### X/Twitter and LinkedIn
 

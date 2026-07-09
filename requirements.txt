@@ -10,3 +10,4 @@ requests>=2.31.0
 beautifulsoup4>=4.12.0
 playwright>=1.40.0
 yt-dlp>=2024.12.0
+telethon>=1.36.0
