@@ -11,9 +11,27 @@ import fcntl
 import json
 import os
 import re
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Routine (non-backfill) Telegram polls run every 15 minutes via cron and
+# normally finish in well under a minute. Telethon's reconnect logic can
+# hang indefinitely on some network failures without ever raising, which
+# would otherwise wedge the lock file indefinitely and silently block every
+# subsequent cron tick. Bound routine polls so a hang fails fast instead.
+TELEGRAM_POLL_TIMEOUT_SECONDS = 600
+
+
+class _TelegramTimeout(Exception):
+    pass
+
+
+def _telegram_timeout_handler(signum, frame):
+    raise _TelegramTimeout(
+        f"Telegram sync exceeded {TELEGRAM_POLL_TIMEOUT_SECONDS}s — likely a network hang"
+    )
 
 _LOCK_DIR = Path(__file__).resolve().parent.parent / "state"
 _lock_fh = None
@@ -518,9 +536,21 @@ if __name__ == "__main__":
                     f"ERROR: invalid --telegram-since '{args.telegram_since}'. Use YYYY-MM-DD.")
                 sys.exit(1)
         _acquire_lock("telegram")
+        if tg_since is None:
+            signal.signal(signal.SIGALRM, _telegram_timeout_handler)
+            signal.alarm(TELEGRAM_POLL_TIMEOUT_SECONDS)
         try:
             process_telegram_posts(since=tg_since)
+        except _TelegramTimeout as e:
+            print(f"\nERROR: {e}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"\nERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
         finally:
+            signal.alarm(0)
             _release_lock()
         sys.exit(0)
 
