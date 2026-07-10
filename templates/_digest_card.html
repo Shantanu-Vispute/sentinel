@@ -12,6 +12,9 @@
       <div class="story-title">{{ s.title }}</div>
     </a>
     <div class="story-summary">{{ s.summary }}</div>
+    {% if s.latest_update %}
+      <div class="story-latest-update"><span class="latest-update-label">Latest</span> {{ s.latest_update }}</div>
+    {% endif %}
     {% if tg_card and s.links %}
       <div class="story-links">
         {% for l in s.links[:4] %}

@@ -110,11 +110,12 @@ def _mention_sort_key(mention: dict) -> tuple[float, float, int]:
         int(mention.get("id") or 0),
     )
 
-def _timeline_sort_key(entry: dict) -> tuple[float, int]:
-    return (
-        _parsed_ts(entry.get("date") or ""),
-        int(entry.get("id") or 0),
-    )
+def _timeline_sort_key(entry: dict) -> int:
+    # timeline_entries.date is the source email's own header, which is
+    # frequently stale/out-of-order across senders (confirmed against real
+    # data: a single story's 42 entries were not chronological by date).
+    # id (an AUTOINCREMENT primary key) is true insertion order.
+    return int(entry.get("id") or 0)
 
 def _parse_iso_dt(s: str) -> datetime | None:
     if not s:
@@ -1087,8 +1088,29 @@ def digest_list():
         """SELECT story_id, sender, date, COALESCE(source_type, 'email') AS source_type
              FROM mentions"""
     ).fetchall()
+    # Latest timeline entry per story, by insertion order (id) rather than the
+    # `date` column — `date` is the source email's own header, which is
+    # frequently stale/out-of-order across senders, so it's unreliable for
+    # "what actually changed most recently."
+    latest_update_rows = conn.execute(
+        """SELECT t.story_id, t.what_changed, t.trigger_sender
+             FROM timeline_entries t
+             INNER JOIN (
+                 SELECT story_id, MAX(id) AS max_id
+                   FROM timeline_entries
+                  GROUP BY story_id
+             ) latest ON t.story_id = latest.story_id AND t.id = latest.max_id"""
+    ).fetchall()
     external_stories = _load_external_stories(conn)
     conn.close()
+
+    latest_update_by_story = {
+        row["story_id"]: {
+            "what_changed": row["what_changed"],
+            "trigger_sender": row["trigger_sender"] or "",
+        }
+        for row in latest_update_rows
+    }
 
     senders_by_story: dict[str, list[str]] = {}
     mention_sources_by_story: dict[str, list[str]] = {}
@@ -1150,6 +1172,7 @@ def digest_list():
             "senders": [],
             "source_rank": 0,
             "sort_ts": ts,
+            "latest_update": latest_update_by_story.get(row["id"], {}).get("what_changed", ""),
         }
         seen_senders = set()
         unique_senders = []
@@ -1469,7 +1492,7 @@ def api_digest_story(story_id: str):
             (story_id,),
         ).fetchall()
     ]
-    timeline.sort(key=_timeline_sort_key)
+    timeline.sort(key=_timeline_sort_key, reverse=True)
     for entry in timeline:
         entry["date_relative"] = _relative_time_label(entry.get("date") or "")
     conn.close()
@@ -1566,7 +1589,7 @@ def digest_story(story_id: str):
         (story_id,),
     ).fetchall()
     timeline_entries = [dict(entry) for entry in timeline]
-    timeline_entries.sort(key=_timeline_sort_key)
+    timeline_entries.sort(key=_timeline_sort_key, reverse=True)
     conn.close()
     return render_template(
         "digest_story.html",
