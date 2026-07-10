@@ -148,7 +148,7 @@ def assess_story_quality(
     ):
         return StoryQuality(score=-4.0, reason="library_release", should_skip_ingestion=True)
 
-    if sender_signal.is_dev_lane_only and not has_material_news:
+    if sender_signal.is_dev_lane_only and not has_material_news and not has_strong_ai:
         return StoryQuality(score=-4.0, reason="dev_lane_sender", should_skip_ingestion=True)
 
     if _PODCAST_RE.search(text_l) and not _AI_RELEVANCE_RE.search((title or "").lower()):

@@ -25,49 +25,44 @@ body {
   background: var(--bg); color: var(--text);
   font-size: 15px; -webkit-font-smoothing: antialiased;
 }
-.layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); min-height: 100vh; }
-@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
 
-.sidebar {
-  background: var(--surface); border-right: 1px solid var(--border);
-  padding: 24px 0; position: sticky; top: 0; height: 100vh;
-  overflow-y: auto; font-size: 14px;
+/* ============================================================
+   Top bar — replaces the old persistent left sidebar. This app has
+   two views (Home/Following) and two filter facets; that's not enough
+   navigation surface to justify permanent sidebar real estate, and a
+   top bar keeps the full page width for the feed itself.
+   ============================================================ */
+.topbar {
+  display: flex; align-items: center; gap: 20px;
+  padding: 14px 32px; border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky; top: 0; z-index: 10;
 }
-.sidebar-header { padding: 0 22px 18px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
-.sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-.sidebar-header .subtitle { font-size: 12px; color: var(--text-subtle); font-weight: 400; margin-top: 2px; }
+.topbar-brand { display: flex; align-items: baseline; gap: 8px; }
+.topbar-brand h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+.topbar-brand .count { font-size: 12px; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
 .mode-toggle {
   display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: 8px; padding: 3px; margin: 14px 10px 0;
+  border-radius: 8px; padding: 3px;
 }
 .mode-toggle a {
-  flex: 1; text-align: center; padding: 6px 10px;
+  padding: 6px 14px;
   font-family: "Inter", system-ui, sans-serif; font-size: 12.5px; font-weight: 500;
   color: var(--text-muted); text-decoration: none; border-radius: 6px;
   transition: background 100ms, color 100ms;
 }
 .mode-toggle a:hover { color: var(--text); }
 .mode-toggle a.active { background: var(--accent); color: white; font-weight: 600; }
-.section-label {
-  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--text-subtle); padding: 14px 22px 6px;
+.topbar-spacer { flex: 1; }
+.topbar .theme-toggle {
+  position: static;
+  width: 32px; height: 32px;
 }
-.side-nav { list-style: none; padding: 0 10px; margin: 0; }
-.side-nav li a {
-  display: flex; justify-content: space-between; align-items: baseline;
-  padding: 6px 12px; border-radius: 6px;
-  color: var(--text-muted); text-decoration: none; font-weight: 500;
-  font-size: 13.5px;
-}
-.side-nav li a:hover { color: var(--text); background: var(--border); }
-.side-nav li a.active { color: var(--accent); background: var(--accent-soft); }
-.side-nav .count { font-size: 11.5px; color: var(--text-subtle); font-variant-numeric: tabular-nums; flex-shrink: 0; }
-.side-nav li a.active .count { color: var(--accent); }
 
-.main { padding: 44px 48px 120px; }
-@media (max-width: 860px) { .main { padding: 24px 20px 80px; } }
+.main { padding: 32px 48px 120px; }
+@media (max-width: 860px) { .main { padding: 20px 20px 80px; } .topbar { padding: 12px 20px; flex-wrap: wrap; } }
 .page-header h1 {
-  font-family: "Inter", sans-serif; font-weight: 700; font-size: 30px;
+  font-family: "Inter", sans-serif; font-weight: 700; font-size: 26px;
   letter-spacing: -0.03em; margin: 0 0 4px;
 }
 .page-header .subtitle { color: var(--text-subtle); font-size: 14px; margin-bottom: 22px; }
@@ -256,14 +251,14 @@ html[data-theme="dark"] .story-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.
 }
 
 .search-help { margin: -8px 0 24px; }
-.search-help summary {
+.search-help summary, .sync-panel > summary {
   cursor: pointer; color: var(--text-subtle); font-size: 12.5px;
   list-style: none; display: inline-flex; align-items: center; gap: 6px; user-select: none;
 }
-.search-help summary::-webkit-details-marker { display: none; }
-.search-help summary::before { content: "▸"; font-size: 9px; transition: transform 120ms; }
-.search-help[open] summary::before { transform: rotate(90deg); }
-.search-help summary:hover { color: var(--text); }
+.search-help summary::-webkit-details-marker, .sync-panel > summary::-webkit-details-marker { display: none; }
+.search-help summary::before, .sync-panel > summary::before { content: "▸"; font-size: 9px; transition: transform 120ms; }
+.search-help[open] summary::before, .sync-panel[open] > summary::before { transform: rotate(90deg); }
+.search-help summary:hover, .sync-panel > summary:hover { color: var(--text); }
 .help-grid {
   display: grid; grid-template-columns: auto 1fr; gap: 4px 14px;
   margin-top: 10px; padding: 14px 16px;
@@ -276,22 +271,11 @@ html[data-theme="dark"] .story-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.
 }
 .help-grid span { color: var(--text-muted); }
 
-.sync-panel {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 14px; margin: 0 0 20px;
-}
-.sync-panel-header {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  margin-bottom: 10px;
-}
-.sync-panel-title {
-  font-size: 13px; font-weight: 700; letter-spacing: 0.01em;
-}
-.sync-panel-note {
-  font-size: 12px; color: var(--text-subtle);
-}
+.sync-panel { margin: 0 0 20px; }
+.sync-panel[open] > summary { margin-bottom: 10px; }
 .sync-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;
+  padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
 }
 .sync-card {
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
@@ -441,7 +425,6 @@ html[data-theme="dark"] .story-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.
 .modal-loading { padding: 60px; text-align: center; color: var(--text-subtle); font-family: "Inter", sans-serif; }
 
 .theme-toggle {
-  position: fixed; top: 16px; right: 20px; z-index: 10;
   background: var(--surface); border: 1px solid var(--border); color: var(--text-muted);
   width: 36px; height: 36px; border-radius: 50%; cursor: pointer;
   display: flex; align-items: center; justify-content: center; font-size: 15px;
@@ -460,10 +443,6 @@ html:not([data-theme="dark"]) .moon { display: none; }
 </script>
 </head>
 <body>
-<button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
-  <span class="sun">☀</span><span class="moon">☾</span>
-</button>
-
 <div class="modal-overlay" id="storyModal" role="dialog" aria-modal="true">
   <div class="modal" id="storyModalInner">
     <button class="modal-close" aria-label="Close">✕</button>
@@ -471,7 +450,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
   </div>
 </div>
 
-{% macro nav_url(src=none, st=none) -%}
+{% macro pill_url(st=none, src=none) -%}
   {{ feed_path or '/digest' }}?
   {%- set parts = [] -%}
   {%- set src_val = source if src is none else src -%}
@@ -482,135 +461,111 @@ html:not([data-theme="dark"]) .moon { display: none; }
   {%- if st_val %}{% set _ = parts.append('state=' ~ st_val) %}{% endif -%}
   {{- parts | join('&') -}}
 {%- endmacro %}
-<div class="layout">
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <h1>Sentinel</h1>
-      <div class="subtitle">{{ total_all or total }} stories</div>
+
+<header class="topbar">
+  <div class="topbar-brand">
+    <h1>Sentinel</h1>
+    <span class="count">{{ total_all or total }} stories</span>
+  </div>
+  <div class="mode-toggle">
+    <a href="/home" class="{% if nav_active == 'home' %}active{% endif %}">Home</a>
+    <a href="/digest" class="{% if nav_active == 'following' %}active{% endif %}">Following</a>
+  </div>
+  <div class="topbar-spacer"></div>
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
+    <span class="sun">☀</span><span class="moon">☾</span>
+  </button>
+</header>
+
+<main class="main">
+  <header class="page-header">
+    <h1>Stories</h1>
+    <div class="subtitle">
+      {{ total }} stories
+      {% if q %}· <a href="{{ feed_path or '/digest' }}" style="color: var(--accent); text-decoration: none;">clear filter</a>{% endif %}
     </div>
-    <div class="section-label">Views</div>
-    <div class="mode-toggle">
-      <a href="/home" class="{% if nav_active == 'home' %}active{% endif %}">Home</a>
-      <a href="/digest" class="{% if nav_active == 'following' %}active{% endif %}">Following</a>
-    </div>
-    <ul class="side-nav">
-      <li><a href="/explore">Explore</a></li>
-    </ul>
-    <div class="section-label">Sources</div>
-    <ul class="side-nav">
-      <li><a href="{{ nav_url(src='all') }}" class="{% if source == 'all' %}active{% endif %}">All <span class="count">{{ total_all }}</span></a></li>
+  </header>
+
+  <form class="toolbar" method="get" action="{{ feed_path or '/digest' }}">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder='Search · e.g. "Sam Altman" sender:TLDR is:unread age:<1w'
+           autofocus>
+    <select name="source" onchange="this.form.submit()" aria-label="Source">
+      <option value="all" {% if source == 'all' %}selected{% endif %}>All sources ({{ total_all }})</option>
       {% for item in source_counts %}
-        <li><a href="{{ nav_url(src=item.source) }}" class="{% if source == item.source %}active{% endif %}">{{ item.label }} <span class="count">{{ item.count }}</span></a></li>
+        <option value="{{ item.source }}" {% if source == item.source %}selected{% endif %}>{{ item.label }} ({{ item.count }})</option>
       {% endfor %}
-    </ul>
-    <div class="section-label">State</div>
-    <ul class="side-nav">
-      <li><a href="{{ nav_url(st='') }}"        class="{% if not state         %}active{% endif %}">All</a></li>
-      <li><a href="{{ nav_url(st='unread') }}"  class="{% if state == 'unread' %}active{% endif %}">Unread</a></li>
-      <li><a href="{{ nav_url(st='read') }}"    class="{% if state == 'read'   %}active{% endif %}">Read</a></li>
-      <li><a href="{{ nav_url(st='skipped') }}" class="{% if state == 'skipped'%}active{% endif %}">Skipped</a></li>
-    </ul>
-  </aside>
+    </select>
+    <select name="sort" onchange="this.form.submit()" aria-label="Sort">
+      <option value="recent"   {% if sort == 'recent'   %}selected{% endif %}>Most recent</option>
+      <option value="mentions" {% if sort == 'mentions' %}selected{% endif %}>Most mentioned</option>
+      <option value="evolved"  {% if sort == 'evolved'  %}selected{% endif %}>Most evolved</option>
+      <option value="oldest"   {% if sort == 'oldest'   %}selected{% endif %}>Oldest first</option>
+    </select>
+    {% if state %}<input type="hidden" name="state" value="{{ state }}">{% endif %}
+    <button class="primary" type="submit">Search</button>
+    <button class="secondary" type="button" id="syncNowBtn" data-source="{{ source or 'all' }}">{{ sync_label }}</button>
+    <span class="toolbar-status" id="syncStatus" aria-live="polite"></span>
+  </form>
 
-  <main class="main">
-    <header class="page-header">
-      <h1>Stories</h1>
-      <div class="subtitle">
-        {{ total }} stories
-        {% if q %}· <a href="{{ feed_path or '/digest' }}" style="color: var(--accent); text-decoration: none;">clear filter</a>{% endif %}
-      </div>
-    </header>
+  <div class="filter-pills">
+    <a href="{{ pill_url(st='') }}"        class="{% if not state           %}active{% endif %}">All</a>
+    <a href="{{ pill_url(st='unread') }}"  class="{% if state == 'unread'   %}active{% endif %}">Unread</a>
+    <a href="{{ pill_url(st='read') }}"    class="{% if state == 'read'     %}active{% endif %}">Read</a>
+    <a href="{{ pill_url(st='skipped') }}" class="{% if state == 'skipped'  %}active{% endif %}">Skipped</a>
+  </div>
 
-    <form class="toolbar" method="get" action="{{ feed_path or '/digest' }}">
-      <input type="search" name="q" value="{{ q }}"
-             placeholder='Search · e.g. "Sam Altman" sender:TLDR is:unread age:<1w'
-             autofocus>
-      <select name="sort" onchange="this.form.submit()" aria-label="Sort">
-        <option value="recent"   {% if sort == 'recent'   %}selected{% endif %}>Most recent</option>
-        <option value="mentions" {% if sort == 'mentions' %}selected{% endif %}>Most mentioned</option>
-        <option value="evolved"  {% if sort == 'evolved'  %}selected{% endif %}>Most evolved</option>
-        <option value="oldest"   {% if sort == 'oldest'   %}selected{% endif %}>Oldest first</option>
-      </select>
-      {% if state %}<input type="hidden" name="state" value="{{ state }}">{% endif %}
-      {% if source and source != 'all' %}<input type="hidden" name="source" value="{{ source }}">{% endif %}
-      <button class="primary" type="submit">Search</button>
-      <button class="secondary" type="button" id="syncNowBtn" data-source="{{ source or 'all' }}">{{ sync_label }}</button>
-      <span class="toolbar-status" id="syncStatus" aria-live="polite"></span>
-    </form>
-
-    {% macro pill_url(st) -%}
-      {{ feed_path or '/digest' }}?
-      {%- set parts = [] -%}
-      {%- if q %}{% set _ = parts.append('q=' ~ (q | urlencode)) %}{% endif -%}
-      {%- if sort and sort != 'recent' %}{% set _ = parts.append('sort=' ~ sort) %}{% endif -%}
-      {%- if source and source != 'all' %}{% set _ = parts.append('source=' ~ source) %}{% endif -%}
-      {%- if st %}{% set _ = parts.append('state=' ~ st) %}{% endif -%}
-      {{- parts | join('&') -}}
-    {%- endmacro %}
-    <div class="filter-pills">
-      <a href="{{ pill_url('') }}"        class="{% if not state           %}active{% endif %}">All</a>
-      <a href="{{ pill_url('unread') }}"  class="{% if state == 'unread'   %}active{% endif %}">Unread</a>
-      <a href="{{ pill_url('read') }}"    class="{% if state == 'read'     %}active{% endif %}">Read</a>
-      <a href="{{ pill_url('skipped') }}" class="{% if state == 'skipped'  %}active{% endif %}">Skipped</a>
+  <details class="search-help" {% if q %}open{% endif %}>
+    <summary>Search syntax</summary>
+    <div class="help-grid">
+      <code>plain words</code><span>match title + summary (word boundary)</span>
+      <code>sender:TLDR</code><span>at least one mention from this sender</span>
+      <code>is:read / is:unread / is:skipped</code><span>by state</span>
+      <code>age:&gt;1w · age:&lt;3d · age:&gt;1mo</code><span>by last-updated age</span>
+      <code>-word</code><span>exclude</span>
     </div>
+  </details>
 
-    <details class="search-help" {% if q %}open{% endif %}>
-      <summary>Search syntax</summary>
-      <div class="help-grid">
-        <code>plain words</code><span>match title + summary (word boundary)</span>
-        <code>sender:TLDR</code><span>at least one mention from this sender</span>
-        <code>is:read / is:unread / is:skipped</code><span>by state</span>
-        <code>age:&gt;1w · age:&lt;3d · age:&gt;1mo</code><span>by last-updated age</span>
-        <code>-word</code><span>exclude</span>
-      </div>
-    </details>
-
-    <section class="sync-panel">
-      <div class="sync-panel-header">
-        <div>
-          <div class="sync-panel-title">Sync status</div>
-          <div class="sync-panel-note">Auto-refreshes while jobs are running</div>
-        </div>
-      </div>
-      <div class="sync-grid" id="syncGrid">
-        {% for job in sync_statuses %}
-          <div class="sync-card" data-sync-job="{{ job.job }}">
-            <div class="sync-card-header">
-              <div class="sync-card-label">{{ job.label }}</div>
-              <span class="sync-badge {{ job.status }}">{{ job.status }}</span>
-            </div>
-            <div class="sync-meta">
-              <span>Started: <span data-field="started_at">{{ job.started_at or '—' }}</span></span>
-              <span>Finished: <span data-field="finished_at">{{ job.finished_at or '—' }}</span></span>
-            </div>
-            <div class="sync-message" data-field="message">{{ job.message or 'No sync yet' }}</div>
+  <details class="sync-panel">
+    <summary>Sync status</summary>
+    <div class="sync-grid" id="syncGrid">
+      {% for job in sync_statuses %}
+        <div class="sync-card" data-sync-job="{{ job.job }}">
+          <div class="sync-card-header">
+            <div class="sync-card-label">{{ job.label }}</div>
+            <span class="sync-badge {{ job.status }}">{{ job.status }}</span>
           </div>
-        {% endfor %}
-      </div>
-    </section>
+          <div class="sync-meta">
+            <span>Started: <span data-field="started_at">{{ job.started_at or '—' }}</span></span>
+            <span>Finished: <span data-field="finished_at">{{ job.finished_at or '—' }}</span></span>
+          </div>
+          <div class="sync-message" data-field="message">{{ job.message or 'No sync yet' }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </details>
 
-    {% if missing %}
-      <div class="empty-state"><p>No stories DB found. Is <code>state/stories.db</code> at the expected path?</p></div>
-    {% elif not stories %}
-      <div class="empty-state"><p>No stories yet. Run Sentinel ingestion to populate.</p></div>
-    {% else %}
-      <div class="grid" id="storyGrid">
-        {% for s in stories %}
-          {% include "_digest_card.html" %}
-        {% endfor %}
-      </div>
-      <div
-        class="infinite-loader"
-        id="infiniteLoader"
-        data-next-page="{{ page + 1 }}"
-        data-has-more="{{ '1' if has_more else '0' }}"
-        {% if not has_more %}hidden{% endif %}
-        aria-live="polite">
-        Loading more stories…
-      </div>
-    {% endif %}
-  </main>
-</div>
+  {% if missing %}
+    <div class="empty-state"><p>No stories DB found. Is <code>state/stories.db</code> at the expected path?</p></div>
+  {% elif not stories %}
+    <div class="empty-state"><p>No stories yet. Run Sentinel ingestion to populate.</p></div>
+  {% else %}
+    <div class="grid" id="storyGrid">
+      {% for s in stories %}
+        {% include "_digest_card.html" %}
+      {% endfor %}
+    </div>
+    <div
+      class="infinite-loader"
+      id="infiniteLoader"
+      data-next-page="{{ page + 1 }}"
+      data-has-more="{{ '1' if has_more else '0' }}"
+      {% if not has_more %}hidden{% endif %}
+      aria-live="polite">
+      Loading more stories…
+    </div>
+  {% endif %}
+</main>
 
 <script>
 document.getElementById("themeToggle").addEventListener("click", function () {
