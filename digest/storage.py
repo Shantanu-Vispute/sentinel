@@ -67,12 +67,25 @@ class StoryDB:
                 processed_at     TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS story_x_links (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                story_id       TEXT NOT NULL,
+                tweet_id       TEXT,
+                url            TEXT NOT NULL,
+                discovered_via TEXT NOT NULL,
+                discovered_at  TEXT NOT NULL,
+                FOREIGN KEY (story_id) REFERENCES stories(id),
+                UNIQUE (story_id, url)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_stories_updated
                 ON stories(last_updated DESC);
             CREATE INDEX IF NOT EXISTS idx_mentions_story
                 ON mentions(story_id);
             CREATE INDEX IF NOT EXISTS idx_timeline_story
                 ON timeline_entries(story_id);
+            CREATE INDEX IF NOT EXISTS idx_story_x_links_story
+                ON story_x_links(story_id);
         """)
 
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(stories)")}
@@ -98,6 +111,9 @@ class StoryDB:
             self.conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_stories_content_hash ON stories(content_hash)"
             )
+        if "x_links_scanned_at" not in cols:
+            self.conn.execute(
+                "ALTER TABLE stories ADD COLUMN x_links_scanned_at TEXT")
         mcols = {r[1]
                  for r in self.conn.execute("PRAGMA table_info(mentions)")}
         if "source_type" not in mcols:
@@ -302,6 +318,36 @@ class StoryDB:
             "SELECT * FROM stories WHERE id = ?", (story_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def stories_needing_x_link_scan(self, days: int | None = None, limit: int = 50) -> list[dict]:
+        query = """SELECT id, title, primary_url, COALESCE(links_json, '') AS links_json
+                     FROM stories
+                    WHERE x_links_scanned_at IS NULL"""
+        params: list = []
+        if days is not None:
+            query += " AND first_seen >= datetime('now', ?)"
+            params.append(f"-{days} days")
+        query += " ORDER BY first_seen ASC LIMIT ?"
+        params.append(limit)
+        return [dict(r) for r in self.conn.execute(query, params).fetchall()]
+
+    def mark_x_links_scanned(self, story_id: str):
+        self.conn.execute(
+            "UPDATE stories SET x_links_scanned_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), story_id),
+        )
+        self.conn.commit()
+
+    def add_x_links(self, story_id: str, links: list[dict], discovered_via: str):
+        now = datetime.now().isoformat()
+        for link in links:
+            self.conn.execute(
+                """INSERT OR IGNORE INTO story_x_links
+                   (story_id, tweet_id, url, discovered_via, discovered_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (story_id, link.get("tweet_id", ""), link["url"], discovered_via, now),
+            )
+        self.conn.commit()
 
     def get_stats(self) -> dict:
         total_stories = self.conn.execute(

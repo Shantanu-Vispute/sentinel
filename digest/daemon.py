@@ -316,7 +316,8 @@ def process_new_emails(max_results: int = 50, since: datetime | None = None):
         for story in email_stories:
             print(f"    · {story.title[:65]}...")
             new_count, merged_count, evolved_count, ok = _persist_story(
-                db, story, new_count, merged_count, evolved_count
+                db, story, new_count, merged_count, evolved_count,
+                links=newsletter.links,
             )
             persist_ok = persist_ok and ok
 
@@ -728,6 +729,81 @@ def backfill_telegram_embeddings(days: int = 10, dry_run: bool = True):
 
     db.close()
 
+def extract_x_links(days: int | None = None, limit: int = 50, dry_run: bool = True):
+    """Scan stories for embedded X/Twitter post links: directly from the
+    source content's own links (email/Telegram), plus a "one hop deeper"
+    fetch of each story's primary_url to catch tweets embedded in a linked
+    blog/article page (the only path that works for BestBlogs, which has no
+    link list of its own). Foundation data for a separate downstream
+    curation tool — this only extracts/stores, no liking/exporting here.
+    Decoupled from the main ingestion crons since it makes an outbound
+    fetch per story to an arbitrary external site."""
+    from digest.x_link_extractor import find_x_links, find_x_links_in_page
+
+    print("=" * 60)
+    mode = "DRY RUN" if dry_run else "LIVE"
+    window = f"last {days}d" if days else "all unscanned"
+    print(f"X-Link Extraction ({window}, {mode})  [{datetime.now().strftime('%Y-%m-%d %H:%M')}]")
+    print("=" * 60)
+
+    db = StoryDB()
+    rows = db.stories_needing_x_link_scan(days=days, limit=limit)
+    print(f"\n[1/2] {len(rows)} stories to scan")
+
+    total_found = 0
+    for i, row in enumerate(rows, 1):
+        print(f"\n  ── [{i}/{len(rows)}] {row['title'][:65]}...")
+
+        source_links = []
+        if row["links_json"]:
+            try:
+                source_links = json.loads(row["links_json"])
+            except Exception:
+                source_links = []
+        direct = find_x_links(source_links)
+
+        linked_page = []
+        if row["primary_url"]:
+            linked_page = find_x_links_in_page(row["primary_url"])
+
+        by_id = {l["tweet_id"]: ("source_content", l) for l in direct}
+        for l in linked_page:
+            by_id.setdefault(l["tweet_id"], ("linked_page", l))
+
+        if not by_id:
+            print(f"      no X links found")
+        else:
+            total_found += len(by_id)
+            print(f"      found {len(by_id)} X link(s)")
+            for via, l in by_id.values():
+                print(f"        [{via}] {l['url']}")
+
+        if not dry_run:
+            for via, l in by_id.values():
+                db.add_x_links(row["id"], [l], discovered_via=via)
+            db.mark_x_links_scanned(row["id"])
+
+    print(f"\n[2/2] Done — {total_found} X link(s) {'found' if dry_run else 'stored'} across {len(rows)} stories")
+    db.close()
+
+def export_x_links(since_days: int | None = None) -> list[dict]:
+    """Dump extracted X post links as a list of dicts (url, tweet_id, story
+    title/id/source_type, discovered_via/at) — for feeding into a separate
+    curation tool. Prints JSON to stdout when run from the CLI."""
+    db = StoryDB()
+    query = """SELECT x.url, x.tweet_id, x.discovered_via, x.discovered_at,
+                      s.id AS story_id, s.title AS story_title, s.source_type
+                 FROM story_x_links x
+                 JOIN stories s ON x.story_id = s.id"""
+    params: list = []
+    if since_days is not None:
+        query += " WHERE x.discovered_at >= datetime('now', ?)"
+        params.append(f"-{since_days} days")
+    query += " ORDER BY x.discovered_at DESC"
+    rows = [dict(r) for r in db.conn.execute(query, params).fetchall()]
+    db.close()
+    return rows
+
 if __name__ == "__main__":
     import argparse
 
@@ -772,12 +848,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "--days",
         type=int,
-        default=10,
-        help="Lookback window in days for --backfill-telegram-embeddings (default: 10)")
+        default=None,
+        help="Lookback window in days (--backfill-telegram-embeddings default: 10; "
+             "--extract-x-links/--export-x-links default: no window, i.e. all)")
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="Actually write changes for --backfill-telegram-embeddings (default is dry-run)")
+        help="Actually write changes for --backfill-telegram-embeddings / --extract-x-links (default is dry-run)")
+    parser.add_argument(
+        "--extract-x-links",
+        action="store_true",
+        help="Scan stories for embedded X/Twitter post links (see --days, --x-links-limit, --execute)")
+    parser.add_argument(
+        "--x-links-limit",
+        type=int,
+        default=50,
+        help="Max stories to scan per run for --extract-x-links (default: 50)")
+    parser.add_argument(
+        "--export-x-links",
+        action="store_true",
+        help="Print extracted X links as JSON (see --days for a since-window)")
     args = parser.parse_args()
 
     since = None
@@ -841,7 +931,7 @@ if __name__ == "__main__":
     if args.backfill_telegram_embeddings:
         _acquire_lock("telegram")
         try:
-            backfill_telegram_embeddings(days=args.days, dry_run=not args.execute)
+            backfill_telegram_embeddings(days=args.days or 10, dry_run=not args.execute)
         except Exception as e:
             print(f"\nERROR: {e}")
             import traceback
@@ -849,6 +939,26 @@ if __name__ == "__main__":
             sys.exit(1)
         finally:
             _release_lock()
+        sys.exit(0)
+
+    if args.extract_x_links:
+        _acquire_lock("x-links")
+        try:
+            extract_x_links(
+                days=args.days, limit=args.x_links_limit, dry_run=not args.execute,
+            )
+        except Exception as e:
+            print(f"\nERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        finally:
+            _release_lock()
+        sys.exit(0)
+
+    if args.export_x_links:
+        rows = export_x_links(since_days=args.days)
+        print(json.dumps(rows, indent=2))
         sys.exit(0)
 
     _acquire_lock()
