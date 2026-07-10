@@ -35,6 +35,18 @@ body {
 .sidebar-header { padding: 0 22px 18px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
 .sidebar-header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
 .sidebar-header .subtitle { font-size: 12px; color: var(--text-subtle); font-weight: 400; margin-top: 2px; }
+.mode-toggle {
+  display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 3px; margin: 14px 10px 0;
+}
+.mode-toggle a {
+  flex: 1; text-align: center; padding: 6px 10px;
+  font-family: "Inter", system-ui, sans-serif; font-size: 12.5px; font-weight: 500;
+  color: var(--text-muted); text-decoration: none; border-radius: 6px;
+  transition: background 100ms, color 100ms;
+}
+.mode-toggle a:hover { color: var(--text); }
+.mode-toggle a.active { background: var(--accent); color: white; font-weight: 600; }
 .section-label {
   font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--text-subtle); padding: 14px 22px 6px;
@@ -157,8 +169,11 @@ html:not([data-theme="dark"]) .moon { display: none; }
       <div class="subtitle">BestBlogs explore</div>
     </div>
     <div class="section-label">Views</div>
+    <div class="mode-toggle">
+      <a href="/home">Home</a>
+      <a href="/digest">Following</a>
+    </div>
     <ul class="side-nav">
-      <li><a href="/digest">Digest</a></li>
       <li><a href="/explore" class="active">Explore</a></li>
     </ul>
   </aside>

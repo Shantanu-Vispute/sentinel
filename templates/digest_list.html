@@ -38,7 +38,7 @@ body {
 .sidebar-header .subtitle { font-size: 12px; color: var(--text-subtle); font-weight: 400; margin-top: 2px; }
 .mode-toggle {
   display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: 8px; padding: 3px; margin-top: 14px;
+  border-radius: 8px; padding: 3px; margin: 14px 10px 0;
 }
 .mode-toggle a {
   flex: 1; text-align: center; padding: 6px 10px;
@@ -472,7 +472,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
 </div>
 
 {% macro nav_url(src=none, st=none) -%}
-  /digest?
+  {{ feed_path or '/digest' }}?
   {%- set parts = [] -%}
   {%- set src_val = source if src is none else src -%}
   {%- set st_val = state if st is none else st -%}
@@ -489,8 +489,11 @@ html:not([data-theme="dark"]) .moon { display: none; }
       <div class="subtitle">{{ total_all or total }} stories</div>
     </div>
     <div class="section-label">Views</div>
+    <div class="mode-toggle">
+      <a href="/home" class="{% if nav_active == 'home' %}active{% endif %}">Home</a>
+      <a href="/digest" class="{% if nav_active == 'following' %}active{% endif %}">Following</a>
+    </div>
     <ul class="side-nav">
-      <li><a href="/digest" class="active">Digest</a></li>
       <li><a href="/explore">Explore</a></li>
     </ul>
     <div class="section-label">Sources</div>
@@ -514,11 +517,11 @@ html:not([data-theme="dark"]) .moon { display: none; }
       <h1>Stories</h1>
       <div class="subtitle">
         {{ total }} stories
-        {% if q %}· <a href="/digest" style="color: var(--accent); text-decoration: none;">clear filter</a>{% endif %}
+        {% if q %}· <a href="{{ feed_path or '/digest' }}" style="color: var(--accent); text-decoration: none;">clear filter</a>{% endif %}
       </div>
     </header>
 
-    <form class="toolbar" method="get" action="/digest">
+    <form class="toolbar" method="get" action="{{ feed_path or '/digest' }}">
       <input type="search" name="q" value="{{ q }}"
              placeholder='Search · e.g. "Sam Altman" sender:TLDR is:unread age:<1w'
              autofocus>
@@ -536,7 +539,7 @@ html:not([data-theme="dark"]) .moon { display: none; }
     </form>
 
     {% macro pill_url(st) -%}
-      /digest?
+      {{ feed_path or '/digest' }}?
       {%- set parts = [] -%}
       {%- if q %}{% set _ = parts.append('q=' ~ (q | urlencode)) %}{% endif -%}
       {%- if sort and sort != 'recent' %}{% set _ = parts.append('sort=' ~ sort) %}{% endif -%}
@@ -809,7 +812,7 @@ document.getElementById("themeToggle").addEventListener("click", function () {
     params.delete("story");
     params.set("partial", "1");
     params.set("page", String(nextPage));
-    return "/digest?" + params.toString();
+    return window.location.pathname + "?" + params.toString();
   }
 
   function finish(message, done) {

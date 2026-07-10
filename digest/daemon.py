@@ -13,7 +13,7 @@ import os
 import re
 import signal
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Routine (non-backfill) Telegram polls run every 15 minutes via cron and
@@ -147,7 +147,9 @@ def _persist_story(
         merged_count,
         evolved_count,
         source_type: str = "email",
-        skip_new_info_check: bool = False):
+        skip_new_info_check: bool = False,
+        links: list[str] | None = None,
+        content_hash: str = ""):
     quality = assess_story_quality(
         story.title,
         story.summary,
@@ -193,6 +195,19 @@ def _persist_story(
             raw_title=story.source_newsletter,
             raw_body=story.source_email_body,
         )
+
+        # Backfill a cover image for stories that started without one (e.g.
+        # a terse first Telegram post) once a later mention from any source
+        # supplies one.
+        if existing and not existing.get("primary_image_url"):
+            candidate_image = getattr(story, "primary_image_url", "")
+            if candidate_image:
+                try:
+                    cached_image = cache_remote_image(candidate_image, source_type)
+                    if cached_image:
+                        db.update_story_image(existing_id, cached_image)
+                except Exception as exc:
+                    print(f"      image backfill failed: {exc}")
 
         if adds_new_info and what_changed:
             new_summary = updated_summary if updated_summary else f"{
@@ -240,6 +255,8 @@ def _persist_story(
             primary_url=getattr(story, "primary_url", ""),
             primary_image_url=primary_image,
             source_type=source_type,
+            links=links,
+            content_hash=content_hash,
         )
         new_count += 1
         print(f"      → NEW [{story_id[:8]}]")
@@ -395,7 +412,7 @@ def process_telegram_posts(since: datetime | None = None):
         return
 
     print(f"\n[2/3] Processing {len(new_posts)} posts...")
-    new_count = 0
+    new_count = merged_count = evolved_count = 0
 
     duplicate_count = 0
 
@@ -441,41 +458,25 @@ def process_telegram_posts(since: datetime | None = None):
             db.mark_email_processed(post.id)
             continue
 
-        primary_image = ""
         if post.images:
-            primary_image = post.images[0]
+            story.primary_image_url = post.images[0]
         elif post.video_thumbs:
-            primary_image = post.video_thumbs[0]
-        if primary_image:
-            try:
-                primary_image = cache_remote_image(primary_image, "telegram")
-            except Exception as exc:
-                print(f"      image cache failed: {exc}")
+            story.primary_image_url = post.video_thumbs[0]
 
-        story_id = db.add_story(
-            title=story.title,
-            summary=story.summary,
-            entities=[],
-            embedding=None,
-            sender=story.source_sender,
-            gmail_url=story.source_gmail_url,
-            date=story.date,
-            mention_title=story.title,
-            mention_summary=story.summary,
-            category="other",
-            primary_url=story.primary_url,
-            source_type="telegram",
-            primary_image_url=primary_image,
-            links=post.links,
-            content_hash=chash,
-        )
         print(f"    · {story.title[:65]}...")
-        print(f"      → NEW [{story_id[:8]}]")
-        new_count += 1
+        new_count, merged_count, evolved_count, ok = _persist_story(
+            db, story, new_count, merged_count, evolved_count,
+            source_type="telegram", links=post.links, content_hash=chash,
+        )
+        if not ok:
+            print(f"      leaving for next run")
+            continue
         db.mark_email_processed(post.id)
 
     print(f"\n[3/3] Done")
     print(f"      New stories:    {new_count}")
+    print(f"      Merged:         {merged_count}")
+    print(f"      Evolved:        {evolved_count}")
     if duplicate_count:
         print(
             f"      Duplicates:     {duplicate_count} (cross-channel reposts skipped)")
@@ -484,6 +485,246 @@ def process_telegram_posts(since: datetime | None = None):
     print(f"\n      DB totals:")
     print(f"      - Stories:   {stats['total_stories']}")
     print(f"      - Mentions:  {stats['total_mentions']}")
+
+    db.close()
+
+def _bestblogs_item_id(item: dict) -> str:
+    raw_id = str(item.get("id") or item.get("readUrl") or item.get("url") or "")
+    return f"BB_{raw_id}" if raw_id else ""
+
+def _bestblogs_item_dt(item: dict) -> datetime | None:
+    raw = item.get("publishDateTimeStr") or ""
+    if raw and raw != "Today":
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except Exception:
+            pass
+    ts = item.get("publishTimeStamp")
+    try:
+        ts_int = int(ts)
+        if ts_int > 10_000_000_000:
+            ts_int //= 1000
+        return datetime.fromtimestamp(ts_int, tz=timezone.utc)
+    except Exception:
+        return None
+
+def _bestblogs_item_date(item: dict) -> str:
+    dt = _bestblogs_item_dt(item)
+    return dt.isoformat() if dt else datetime.now(timezone.utc).isoformat()
+
+def _bestblogs_item_to_story(item: dict):
+    from digest.story_extractor import Story
+
+    title = (item.get("title") or item.get("originalTitle") or "").strip()[:200]
+    summary = (item.get("oneSentenceSummary") or item.get("summary") or "").strip()
+    url = item.get("url") or item.get("readUrl") or ""
+    sender = item.get("sourceName") or item.get("domain") or item.get("author") or "BestBlogs"
+
+    return Story(
+        title=title,
+        summary=summary,
+        primary_url=url,
+        primary_image_url=item.get("cover") or "",
+        source_newsletter=sender,
+        source_sender=sender,
+        source_gmail_url=url,
+        date=_bestblogs_item_date(item),
+    )
+
+def process_bestblogs_items(max_items: int = 15, days: int | None = None):
+    from digest.bestblogs_client import fetch_resources
+
+    print("=" * 60)
+    label = f" (backfill: last {days}d, up to {max_items})" if days else ""
+    print(f"Sentinel BestBlogs Ingestion{label}  [{datetime.now().strftime('%Y-%m-%d %H:%M')}]")
+    print("=" * 60)
+
+    db = StoryDB()
+
+    print("\n[1/3] Fetching AI items from BestBlogs...")
+    page_size = 50 if days else max_items
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days) if days else None
+    items = []
+    page = 1
+    max_pages = 30
+    while len(items) < max_items and page <= max_pages:
+        try:
+            response = fetch_resources({
+                "type": "ALL",
+                "sortType": "time_desc",
+                "category": "ai",
+                "timeFilter": "all",
+                "language": "en_US",
+                "page": page,
+                "pageSize": page_size,
+            })
+        except Exception as e:
+            print(f"      ERROR: fetch failed on page {page}: {e}")
+            break
+
+        page_items = (response.get("data") or {}).get("dataList") or []
+        if not page_items:
+            break
+
+        if cutoff is not None:
+            in_window = []
+            hit_cutoff = False
+            for item in page_items:
+                item_dt = _bestblogs_item_dt(item)
+                if item_dt is not None and item_dt < cutoff:
+                    hit_cutoff = True
+                    break
+                in_window.append(item)
+            items.extend(in_window)
+            if hit_cutoff:
+                break
+        else:
+            items.extend(page_items)
+
+        page += 1
+
+    items = items[:max_items]
+    print(f"      {len(items)} items fetched")
+
+    new_items = []
+    for item in items:
+        item_id = _bestblogs_item_id(item)
+        if not item_id:
+            continue
+        if db.is_email_processed(item_id):
+            continue
+        new_items.append((item_id, item))
+    already = len(items) - len(new_items)
+    if already:
+        print(f"      {already} already processed — skipping")
+
+    if not new_items:
+        print("      Nothing new to process.")
+        db.close()
+        return
+
+    print(f"\n[2/3] Processing {len(new_items)} items...")
+    new_count = merged_count = evolved_count = 0
+
+    for i, (item_id, item) in enumerate(new_items, 1):
+        story = _bestblogs_item_to_story(item)
+        if not story.title or not story.summary:
+            print(f"\n  ── [{i}/{len(new_items)}] (missing title/summary — skipping)")
+            db.mark_email_processed(item_id)
+            continue
+
+        print(f"\n  ── [{i}/{len(new_items)}] {story.title[:65]}...")
+        new_count, merged_count, evolved_count, ok = _persist_story(
+            db, story, new_count, merged_count, evolved_count,
+            source_type="bestblogs",
+        )
+        if not ok:
+            print(f"      leaving for next run")
+            continue
+        db.mark_email_processed(item_id)
+
+    print(f"\n[3/3] Done")
+    print(f"      New stories:    {new_count}")
+    print(f"      Merged:         {merged_count}")
+    print(f"      Evolved:        {evolved_count}")
+
+    stats = db.get_stats()
+    print(f"\n      DB totals:")
+    print(f"      - Stories:   {stats['total_stories']}")
+    print(f"      - Mentions:  {stats['total_mentions']}")
+
+    db.close()
+
+def backfill_telegram_embeddings(days: int = 10, dry_run: bool = True):
+    """Retroactively embed Telegram stories ingested before Telegram got a
+    real vector-clustering path (see process_telegram_posts). If a story
+    turns out to be a duplicate of an existing story, merge it in rather
+    than just adding an orphan embedding — this is the actual fix for the
+    RoboDojo/GPT-5.6/Muse-Spark-style duplicates found earlier, applied
+    retroactively to stories that already exist. Processed oldest-first so
+    the earliest-seen story in a duplicate cluster becomes the survivor.
+    dry_run=True (default) only reports what would happen, no writes."""
+    print("=" * 60)
+    mode = "DRY RUN" if dry_run else "LIVE"
+    print(f"Telegram Embedding Backfill (last {days}d, {mode})  [{datetime.now().strftime('%Y-%m-%d %H:%M')}]")
+    print("=" * 60)
+
+    db = StoryDB()
+    rows = db.conn.execute(
+        """SELECT id, title, summary, first_seen,
+                  COALESCE(primary_image_url, '') AS primary_image_url,
+                  mention_count, COALESCE(is_read, 0) AS is_read
+             FROM stories
+            WHERE source_type = 'telegram' AND first_seen >= datetime('now', ?)
+            ORDER BY first_seen ASC""",
+        (f"-{days} days",),
+    ).fetchall()
+    print(f"\n[1/2] {len(rows)} Telegram stories from the last {days} days to check")
+
+    merge_count = embed_count = 0
+    merges = []
+
+    for i, row in enumerate(rows, 1):
+        story_id, title, summary = row["id"], row["title"], row["summary"]
+        print(f"\n  ── [{i}/{len(rows)}] {title[:65]}...")
+        try:
+            emb_resp = llm_client.embed(input_text=f"{title}. {summary}")
+            embedding = emb_resp.embeddings[0]
+        except Exception as e:
+            print(f"      WARN: embed failed: {e}")
+            continue
+
+        existing_id = db.find_similar(embedding, threshold=SIMILARITY_THRESHOLD)
+        if existing_id and existing_id != story_id:
+            target = db.get_story(existing_id)
+            print(f"      DUPLICATE of [{existing_id[:8]}] {target['title'][:55]}")
+            merge_count += 1
+            merges.append((story_id, title, existing_id, target["title"]))
+            if not dry_run:
+                adds_new_info, what_changed, updated_title, updated_summary = False, "", "", ""
+                if target["mention_count"] >= 2:
+                    adds_new_info, what_changed, updated_title, updated_summary = _check_new_info(
+                        target["title"], target["summary"], title, summary,
+                    )
+                if not target.get("primary_image_url") and row["primary_image_url"]:
+                    try:
+                        cached = cache_remote_image(row["primary_image_url"], "telegram")
+                        if cached:
+                            db.update_story_image(existing_id, cached)
+                    except Exception as exc:
+                        print(f"      image backfill failed: {exc}")
+                db.merge_stories(story_id, existing_id)
+                if adds_new_info and what_changed:
+                    new_summary = updated_summary if updated_summary else f"{
+                        target['summary']} {what_changed}"
+                    db.update_story_summary(existing_id, new_summary.strip())
+                    updated_title = (updated_title or "").strip()
+                    if updated_title and updated_title != target.get("title"):
+                        db.update_story_title(existing_id, updated_title)
+                    db.add_timeline_entry(
+                        story_id=existing_id, date=row["first_seen"],
+                        what_changed=what_changed, trigger_sender="backfill",
+                    )
+                    db.increment_new_info_count(existing_id)
+                    if target.get("is_read"):
+                        db.mark_unread(existing_id)
+                    print(f"      → MERGED + EVOLVED: {what_changed[:60]}")
+                else:
+                    print(f"      → MERGED into [{existing_id[:8]}]")
+        else:
+            embed_count += 1
+            print(f"      distinct — {'would add' if dry_run else 'adding'} embedding")
+            if not dry_run:
+                db.add_embedding(story_id, embedding, title, row["first_seen"])
+
+    print(f"\n[2/2] Done")
+    print(f"      Duplicates {'found' if dry_run else 'merged'}: {merge_count}")
+    print(f"      Embedded as distinct:      {embed_count}")
+    if dry_run and merges:
+        print(f"\n      Merge candidates (dry run — nothing written):")
+        for source_id, source_title, target_id, target_title in merges:
+            print(f"      [{source_id[:8]}] {source_title[:55]}")
+            print(f"        -> [{target_id[:8]}] {target_title[:55]}")
 
     db.close()
 
@@ -510,6 +751,33 @@ if __name__ == "__main__":
         type=str,
         default=None,
         help="Backfill TG posts from this date (YYYY-MM-DD), e.g. --telegram-since 2026-04-12")
+    parser.add_argument(
+        "--bestblogs",
+        action="store_true",
+        help="Fetch and ingest the latest AI items from BestBlogs instead of Gmail")
+    parser.add_argument(
+        "--bestblogs-backfill-days",
+        type=int,
+        default=None,
+        help="Backfill BestBlogs items from the last N days (paginates, capped by --bestblogs-backfill-max)")
+    parser.add_argument(
+        "--bestblogs-backfill-max",
+        type=int,
+        default=300,
+        help="Max items to pull for --bestblogs-backfill-days (default: 300)")
+    parser.add_argument(
+        "--backfill-telegram-embeddings",
+        action="store_true",
+        help="Retroactively embed/merge existing Telegram stories from the last N days (see --days, --execute)")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=10,
+        help="Lookback window in days for --backfill-telegram-embeddings (default: 10)")
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Actually write changes for --backfill-telegram-embeddings (default is dry-run)")
     args = parser.parse_args()
 
     since = None
@@ -551,6 +819,35 @@ if __name__ == "__main__":
             sys.exit(1)
         finally:
             signal.alarm(0)
+            _release_lock()
+        sys.exit(0)
+
+    if args.bestblogs:
+        _acquire_lock("bestblogs")
+        try:
+            process_bestblogs_items(
+                max_items=args.bestblogs_backfill_max if args.bestblogs_backfill_days else 15,
+                days=args.bestblogs_backfill_days,
+            )
+        except Exception as e:
+            print(f"\nERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        finally:
+            _release_lock()
+        sys.exit(0)
+
+    if args.backfill_telegram_embeddings:
+        _acquire_lock("telegram")
+        try:
+            backfill_telegram_embeddings(days=args.days, dry_run=not args.execute)
+        except Exception as e:
+            print(f"\nERROR: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        finally:
             _release_lock()
         sys.exit(0)
 

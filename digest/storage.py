@@ -235,6 +235,13 @@ class StoryDB:
         )
         self.conn.commit()
 
+    def update_story_image(self, story_id: str, primary_image_url: str):
+        self.conn.execute(
+            "UPDATE stories SET primary_image_url = ? WHERE id = ?",
+            (primary_image_url, story_id),
+        )
+        self.conn.commit()
+
     def add_timeline_entry(
             self,
             story_id: str,
@@ -256,6 +263,38 @@ class StoryDB:
     def mark_unread(self, story_id: str):
         self.conn.execute(
             "UPDATE stories SET is_read = 0 WHERE id = ?", (story_id,))
+        self.conn.commit()
+
+    def add_embedding(self, story_id: str, embedding: list[float], title: str, date: str):
+        """Add an embedding for a story that already exists in `stories` but
+        was never added to the vector collection (e.g. an old Telegram story
+        ingested before embeddings were wired up for that source)."""
+        self.collection.add(
+            ids=[story_id],
+            embeddings=[embedding],
+            metadatas=[{"title": title, "date": date}],
+        )
+
+    def merge_stories(self, source_id: str, target_id: str):
+        """Merge `source_id` into `target_id`: move its mentions/timeline
+        entries over, fold its mention_count into the target, then delete
+        the now-empty source row. Used for retroactively fixing pre-existing
+        duplicate stories (e.g. an old Telegram story that turns out to
+        describe the same event as an existing email story)."""
+        source = self.get_story(source_id)
+        if source is None:
+            return
+        self.conn.execute(
+            "UPDATE mentions SET story_id = ? WHERE story_id = ?", (target_id, source_id),
+        )
+        self.conn.execute(
+            "UPDATE timeline_entries SET story_id = ? WHERE story_id = ?", (target_id, source_id),
+        )
+        self.conn.execute(
+            "UPDATE stories SET mention_count = mention_count + ? WHERE id = ?",
+            (source["mention_count"] or 0, target_id),
+        )
+        self.conn.execute("DELETE FROM stories WHERE id = ?", (source_id,))
         self.conn.commit()
 
     def get_story(self, story_id: str) -> Optional[dict]:

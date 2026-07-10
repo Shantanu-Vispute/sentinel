@@ -33,12 +33,14 @@ SYNC_TARGETS = {
         ("telegram", "Telegram", SCRIPTS_DIR / "run-telegram.sh"),
         ("social", "Social", SCRIPTS_DIR / "run-social.sh"),
         ("youtube", "YouTube", SCRIPTS_DIR / "run-youtube.sh"),
+        ("bestblogs", "BestBlogs", SCRIPTS_DIR / "run-bestblogs.sh"),
     ],
     "email": [("email", "Email", SCRIPTS_DIR / "run-email.sh")],
     "telegram": [("telegram", "Telegram", SCRIPTS_DIR / "run-telegram.sh")],
     "twitter": [("social", "Social", SCRIPTS_DIR / "run-social.sh")],
     "linkedin": [("social", "Social", SCRIPTS_DIR / "run-social.sh")],
     "youtube": [("youtube", "YouTube", SCRIPTS_DIR / "run-youtube.sh")],
+    "bestblogs": [("bestblogs", "BestBlogs", SCRIPTS_DIR / "run-bestblogs.sh")],
 }
 STORY_DETAIL_COLUMNS = """id, title, summary, first_seen, last_updated,
 mention_count, new_info_count, is_read, primary_url, primary_url_host,
@@ -1012,7 +1014,7 @@ def _all_sync_statuses() -> list[dict]:
 
 @app.route("/")
 def index():
-    return redirect("/digest")
+    return redirect("/home")
 
 @app.route("/explore")
 def explore():
@@ -1053,8 +1055,21 @@ def api_explore_sources():
     except Exception as exc:
         return jsonify({"success": False, "message": str(exc)}), 502
 
+@app.route("/home")
+def home_feed():
+    return _render_digest_feed(nav_active="home", feed_path="/home")
+
 @app.route("/digest")
 def digest_list():
+    return _render_digest_feed(
+        nav_active="following", feed_path="/digest",
+        default_excluded_sources={"bestblogs"},
+    )
+
+def _render_digest_feed(
+        nav_active: str,
+        feed_path: str,
+        default_excluded_sources: frozenset = frozenset()):
     conn = _stories_conn()
     if conn is None:
         return render_template(
@@ -1070,6 +1085,8 @@ def digest_list():
             source="all",
             sync_label=_sync_button_label("all"),
             sync_statuses=_all_sync_statuses(),
+            nav_active=nav_active,
+            feed_path=feed_path,
         )
 
     rows = conn.execute(
@@ -1132,7 +1149,8 @@ def digest_list():
 
     sort = (request.args.get("sort") or "recent").strip().lower()
     state = (request.args.get("state") or "").strip().lower()
-    source = (request.args.get("source") or "all").strip().lower()
+    requested_source_param = (request.args.get("source") or "").strip().lower()
+    source = requested_source_param or "all"
 
     all_stories = []
     source_count_map: dict[str, int] = {}
@@ -1236,11 +1254,18 @@ def digest_list():
         story["dev_lane_sender_count"] = 0
         all_stories.append(story)
 
+    # Sidebar facets omit default_excluded_sources (e.g. Following hides the
+    # BestBlogs facet), but `known_sources` for query-param validation stays
+    # the full set — an explicit ?source=bestblogs must still work on either
+    # route, only the *implicit* default view differs between Home/Following.
+    nav_count_map = {
+        k: v for k, v in source_count_map.items() if k not in default_excluded_sources
+    }
     source_counts = [
         {"source": key, "label": _source_label(key), "count": count}
-        for key, count in sorted(source_count_map.items(), key=lambda item: (-item[1], item[0]))
+        for key, count in sorted(nav_count_map.items(), key=lambda item: (-item[1], item[0]))
     ]
-    known_sources = {item["source"] for item in source_counts}
+    known_sources = set(source_count_map.keys())
     if source != "all" and source not in known_sources:
         source = "all"
 
@@ -1250,6 +1275,10 @@ def digest_list():
     if source != "all":
         stories = [
             story for story in stories if story["source_type"] == source]
+    elif not requested_source_param and default_excluded_sources:
+        stories = [
+            story for story in stories
+            if story["source_type"] not in default_excluded_sources]
 
     if q:
         wants_skipped = any(
@@ -1318,7 +1347,7 @@ def digest_list():
             ),
             reverse=True)
 
-    total_unskipped = sum(source_count_map.values())
+    total_unskipped = sum(nav_count_map.values())
 
     try:
         per_page = int(request.args.get("per_page") or 50)
@@ -1363,6 +1392,8 @@ def digest_list():
         page=page,
         per_page=per_page,
         has_more=has_more,
+        nav_active=nav_active,
+        feed_path=feed_path,
     )
 
 @app.route("/api/digest/skip", methods=["POST"])
