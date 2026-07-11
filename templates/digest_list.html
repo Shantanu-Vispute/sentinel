@@ -41,23 +41,26 @@ body {
 .topbar-brand { display: flex; align-items: baseline; gap: 8px; }
 .topbar-brand h1 { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
 .topbar-brand .count { font-size: 12px; color: var(--text-subtle); font-variant-numeric: tabular-nums; }
-.mode-toggle {
-  display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--border);
-  border-radius: 8px; padding: 3px;
+.topbar-logo {
+  display: inline-flex; align-items: center; justify-content: flex-start;
+  width: 20px; height: 20px; color: var(--text); text-decoration: none; flex-shrink: 0;
 }
-.mode-toggle a {
-  padding: 6px 14px;
-  font-family: "Inter", system-ui, sans-serif; font-size: 12.5px; font-weight: 500;
-  color: var(--text-muted); text-decoration: none; border-radius: 6px;
-  transition: background 100ms, color 100ms;
+.topbar-logo svg { width: 20px; height: 20px; display: block; }
+.topbar-spacer { width: 20px; flex-shrink: 0; }
+.nav-tabs {
+  display: flex; gap: 24px; align-items: center;
+  flex: 1; justify-content: center;
+  overflow-x: auto; scrollbar-width: none;
 }
-.mode-toggle a:hover { color: var(--text); }
-.mode-toggle a.active { background: var(--accent); color: white; font-weight: 600; }
-.topbar-spacer { flex: 1; }
-.topbar .theme-toggle {
-  position: static;
-  width: 32px; height: 32px;
+.nav-tabs::-webkit-scrollbar { display: none; }
+.nav-tabs a {
+  font-family: "Inter", system-ui, sans-serif; font-size: 14px; font-weight: 500;
+  color: var(--text-subtle); text-decoration: none; white-space: nowrap;
+  padding: 4px 2px 6px; border-bottom: 2px solid transparent;
+  transition: color 100ms, border-color 100ms;
 }
+.nav-tabs a:hover { color: var(--text); }
+.nav-tabs a.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
 
 .main { padding: 32px 48px 120px; }
 @media (max-width: 860px) { .main { padding: 20px 20px 80px; } .topbar { padding: 12px 20px; flex-wrap: wrap; } }
@@ -202,107 +205,6 @@ html[data-theme="dark"] .story-card:hover { box-shadow: 0 6px 18px rgba(0,0,0,0.
   font-size: 13px;
 }
 .infinite-loader[hidden] { display: none; }
-
-/* search toolbar */
-.toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
-.toolbar input[type="search"] {
-  flex: 1; min-width: 260px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  padding: 10px 14px; font: inherit; font-size: 14px; color: var(--text); outline: none;
-  font-family: "Inter", sans-serif;
-  transition: border-color 100ms;
-}
-.toolbar input[type="search"]:focus { border-color: var(--accent); }
-.toolbar button.primary {
-  background: var(--accent); color: white; border: 1px solid var(--accent); border-radius: 8px;
-  padding: 9px 16px; cursor: pointer; font: inherit; font-size: 13.5px; font-weight: 600;
-  font-family: "Inter", sans-serif;
-}
-.toolbar button.primary:hover { background: var(--accent-hover); }
-.toolbar button.secondary {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
-  padding: 9px 14px; cursor: pointer; font: inherit; font-size: 13.5px; font-weight: 600;
-  font-family: "Inter", sans-serif;
-}
-.toolbar button.secondary:hover { border-color: var(--border-strong); }
-.toolbar button[disabled] { opacity: 0.6; cursor: wait; }
-.toolbar-status {
-  font-size: 12.5px; color: var(--text-subtle);
-}
-.toolbar-status.error { color: #d95150; }
-.toolbar-status.success { color: var(--accent); }
-.toolbar select {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  padding: 9px 12px; font: inherit; font-size: 13.5px; color: var(--text);
-  font-family: "Inter", sans-serif; cursor: pointer; outline: none;
-}
-.toolbar select:focus { border-color: var(--accent); }
-
-.filter-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
-.filter-pills a {
-  font-family: "Inter", sans-serif; font-size: 12.5px; font-weight: 500;
-  color: var(--text-muted); text-decoration: none;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
-  padding: 5px 12px; transition: background 100ms, color 100ms, border-color 100ms;
-}
-.filter-pills a:hover { color: var(--text); border-color: var(--border-strong); }
-.filter-pills a.active {
-  background: var(--accent); border-color: var(--accent); color: white; font-weight: 600;
-}
-
-.search-help { margin: -8px 0 24px; }
-.search-help summary, .sync-panel > summary {
-  cursor: pointer; color: var(--text-subtle); font-size: 12.5px;
-  list-style: none; display: inline-flex; align-items: center; gap: 6px; user-select: none;
-}
-.search-help summary::-webkit-details-marker, .sync-panel > summary::-webkit-details-marker { display: none; }
-.search-help summary::before, .sync-panel > summary::before { content: "▸"; font-size: 9px; transition: transform 120ms; }
-.search-help[open] summary::before, .sync-panel[open] > summary::before { transform: rotate(90deg); }
-.search-help summary:hover, .sync-panel > summary:hover { color: var(--text); }
-.help-grid {
-  display: grid; grid-template-columns: auto 1fr; gap: 4px 14px;
-  margin-top: 10px; padding: 14px 16px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-  font-size: 12.5px; max-width: 700px;
-}
-.help-grid code {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  color: var(--accent); white-space: nowrap;
-}
-.help-grid span { color: var(--text-muted); }
-
-.sync-panel { margin: 0 0 20px; }
-.sync-panel[open] > summary { margin-bottom: 10px; }
-.sync-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;
-  padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-}
-.sync-card {
-  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-  padding: 10px 12px;
-}
-.sync-card-header {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  margin-bottom: 6px;
-}
-.sync-card-label {
-  font-size: 12.5px; font-weight: 600;
-}
-.sync-badge {
-  display: inline-flex; align-items: center; border-radius: 999px;
-  padding: 2px 8px; font-size: 10.5px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.05em; background: var(--border); color: var(--text-muted);
-}
-.sync-badge.running { background: #d8e7ff; color: #2b5fb3; }
-.sync-badge.success { background: #d9efe1; color: #28764c; }
-.sync-badge.failed { background: #f6dddd; color: #b04040; }
-.sync-meta {
-  font-size: 11.5px; color: var(--text-subtle); display: flex; flex-direction: column; gap: 3px;
-}
-.sync-message {
-  margin-top: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.35;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
 
 /* story modal */
 .modal-overlay {
@@ -450,31 +352,23 @@ html:not([data-theme="dark"]) .moon { display: none; }
   </div>
 </div>
 
-{% macro pill_url(st=none, src=none) -%}
-  {{ feed_path or '/digest' }}?
-  {%- set parts = [] -%}
-  {%- set src_val = source if src is none else src -%}
-  {%- set st_val = state if st is none else st -%}
-  {%- if q %}{% set _ = parts.append('q=' ~ (q | urlencode)) %}{% endif -%}
-  {%- if sort and sort != 'recent' %}{% set _ = parts.append('sort=' ~ sort) %}{% endif -%}
-  {%- if src_val and src_val != 'all' %}{% set _ = parts.append('source=' ~ src_val) %}{% endif -%}
-  {%- if st_val %}{% set _ = parts.append('state=' ~ st_val) %}{% endif -%}
-  {{- parts | join('&') -}}
-{%- endmacro %}
-
 <header class="topbar">
-  <div class="topbar-brand">
-    <h1>Sentinel</h1>
-    <span class="count">{{ total_all or total }} stories</span>
-  </div>
-  <div class="mode-toggle">
-    <a href="/home" class="{% if nav_active == 'home' %}active{% endif %}">Home</a>
+  <a class="topbar-logo" href="/home" aria-label="Sentinel home">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="10.3" y="1" width="3.4" height="22" rx="1.7" />
+      <rect x="10.3" y="1" width="3.4" height="22" rx="1.7" transform="rotate(60 12 12)" />
+      <rect x="10.3" y="1" width="3.4" height="22" rx="1.7" transform="rotate(120 12 12)" />
+    </svg>
+  </a>
+  <nav class="nav-tabs">
+    <a href="/home" class="{% if nav_active == 'home' and (not source or source == 'all') %}active{% endif %}">For You</a>
     <a href="/digest" class="{% if nav_active == 'following' %}active{% endif %}">Following</a>
-  </div>
-  <div class="topbar-spacer"></div>
-  <button class="theme-toggle" id="themeToggle" aria-label="Toggle theme">
-    <span class="sun">☀</span><span class="moon">☾</span>
-  </button>
+    {% for item in source_counts if item.source not in ('bestblogs', 'youtube') %}
+    <a href="/home?source={{ item.source }}" class="{% if source == item.source %}active{% endif %}">{{ item.label }}</a>
+    {% endfor %}
+    <a href="/bookmarks">Bookmarks</a>
+  </nav>
+  <div class="topbar-spacer" aria-hidden="true"></div>
 </header>
 
 <main class="main">
@@ -482,68 +376,8 @@ html:not([data-theme="dark"]) .moon { display: none; }
     <h1>Stories</h1>
     <div class="subtitle">
       {{ total }} stories
-      {% if q %}· <a href="{{ feed_path or '/digest' }}" style="color: var(--accent); text-decoration: none;">clear filter</a>{% endif %}
     </div>
   </header>
-
-  <form class="toolbar" method="get" action="{{ feed_path or '/digest' }}">
-    <input type="search" name="q" value="{{ q }}"
-           placeholder='Search · e.g. "Sam Altman" sender:TLDR is:unread age:<1w'
-           autofocus>
-    <select name="source" onchange="this.form.submit()" aria-label="Source">
-      <option value="all" {% if source == 'all' %}selected{% endif %}>All sources ({{ total_all }})</option>
-      {% for item in source_counts %}
-        <option value="{{ item.source }}" {% if source == item.source %}selected{% endif %}>{{ item.label }} ({{ item.count }})</option>
-      {% endfor %}
-    </select>
-    <select name="sort" onchange="this.form.submit()" aria-label="Sort">
-      <option value="recent"   {% if sort == 'recent'   %}selected{% endif %}>Most recent</option>
-      <option value="mentions" {% if sort == 'mentions' %}selected{% endif %}>Most mentioned</option>
-      <option value="evolved"  {% if sort == 'evolved'  %}selected{% endif %}>Most evolved</option>
-      <option value="oldest"   {% if sort == 'oldest'   %}selected{% endif %}>Oldest first</option>
-    </select>
-    {% if state %}<input type="hidden" name="state" value="{{ state }}">{% endif %}
-    <button class="primary" type="submit">Search</button>
-    <button class="secondary" type="button" id="syncNowBtn" data-source="{{ source or 'all' }}">{{ sync_label }}</button>
-    <span class="toolbar-status" id="syncStatus" aria-live="polite"></span>
-  </form>
-
-  <div class="filter-pills">
-    <a href="{{ pill_url(st='') }}"        class="{% if not state           %}active{% endif %}">All</a>
-    <a href="{{ pill_url(st='unread') }}"  class="{% if state == 'unread'   %}active{% endif %}">Unread</a>
-    <a href="{{ pill_url(st='read') }}"    class="{% if state == 'read'     %}active{% endif %}">Read</a>
-    <a href="{{ pill_url(st='skipped') }}" class="{% if state == 'skipped'  %}active{% endif %}">Skipped</a>
-  </div>
-
-  <details class="search-help" {% if q %}open{% endif %}>
-    <summary>Search syntax</summary>
-    <div class="help-grid">
-      <code>plain words</code><span>match title + summary (word boundary)</span>
-      <code>sender:TLDR</code><span>at least one mention from this sender</span>
-      <code>is:read / is:unread / is:skipped</code><span>by state</span>
-      <code>age:&gt;1w · age:&lt;3d · age:&gt;1mo</code><span>by last-updated age</span>
-      <code>-word</code><span>exclude</span>
-    </div>
-  </details>
-
-  <details class="sync-panel">
-    <summary>Sync status</summary>
-    <div class="sync-grid" id="syncGrid">
-      {% for job in sync_statuses %}
-        <div class="sync-card" data-sync-job="{{ job.job }}">
-          <div class="sync-card-header">
-            <div class="sync-card-label">{{ job.label }}</div>
-            <span class="sync-badge {{ job.status }}">{{ job.status }}</span>
-          </div>
-          <div class="sync-meta">
-            <span>Started: <span data-field="started_at">{{ job.started_at or '—' }}</span></span>
-            <span>Finished: <span data-field="finished_at">{{ job.finished_at or '—' }}</span></span>
-          </div>
-          <div class="sync-message" data-field="message">{{ job.message or 'No sync yet' }}</div>
-        </div>
-      {% endfor %}
-    </div>
-  </details>
 
   {% if missing %}
     <div class="empty-state"><p>No stories DB found. Is <code>state/stories.db</code> at the expected path?</p></div>
@@ -568,14 +402,21 @@ html:not([data-theme="dark"]) .moon { display: none; }
 </main>
 
 <script>
-document.getElementById("themeToggle").addEventListener("click", function () {
-  var html = document.documentElement;
-  var next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
-  if (next === "dark") html.setAttribute("data-theme", "dark"); else html.removeAttribute("data-theme");
-  localStorage.setItem("theme", next);
-});
-
 // Story modal — click a card title to open in-place
+(function () {
+  document.addEventListener("keydown", function (e) {
+    var target = e.target;
+    if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key.toLowerCase() !== "d") return;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    var html = document.documentElement;
+    var next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    if (next === "dark") html.setAttribute("data-theme", "dark");
+    else html.removeAttribute("data-theme");
+    localStorage.setItem("theme", next);
+  });
+})();
+
 (function () {
   var overlay = document.getElementById("storyModal");
   var inner = document.getElementById("storyModalInner");
@@ -608,7 +449,7 @@ document.getElementById("themeToggle").addEventListener("click", function () {
         'read on ' + escape(host || "source") + ' →</a>'
       : '';
     var isTelegram = story.source_type === "telegram";
-    var heroImg = story.primary_image_url
+    var heroImg = story.source_type !== "email" && story.primary_image_url
       ? '<img class="mhero" src="' + escape(story.primary_image_url) + '" alt="" referrerpolicy="no-referrer">'
       : '';
     var summaryClass = isTelegram ? "msummary preserve-formatting" : "msummary";
@@ -832,97 +673,6 @@ document.getElementById("themeToggle").addEventListener("click", function () {
   }
 })();
 
-
-(function () {
-  var btn = document.getElementById("syncNowBtn");
-  var status = document.getElementById("syncStatus");
-  var syncGrid = document.getElementById("syncGrid");
-  if (!btn || !status) return;
-
-  function fmt(ts) {
-    if (!ts) return "—";
-    try {
-      var d = new Date(ts);
-      if (isNaN(d.getTime())) return ts;
-      return d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    } catch (e) {
-      return ts;
-    }
-  }
-
-  function renderJobs(jobs) {
-    if (!syncGrid || !jobs) return;
-    jobs.forEach(function (job) {
-      var card = syncGrid.querySelector('[data-sync-job="' + job.job + '"]');
-      if (!card) return;
-      var badge = card.querySelector(".sync-badge");
-      if (badge) {
-        badge.className = "sync-badge " + (job.status || "idle");
-        badge.textContent = job.status || "idle";
-      }
-      var started = card.querySelector('[data-field="started_at"]');
-      var finished = card.querySelector('[data-field="finished_at"]');
-      var message = card.querySelector('[data-field="message"]');
-      if (started) started.textContent = fmt(job.started_at);
-      if (finished) finished.textContent = fmt(job.finished_at);
-      if (message) message.textContent = job.message || "No sync yet";
-    });
-  }
-
-  function refreshSyncStatus() {
-    fetch("/api/digest/sync-status")
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        var jobs = data.jobs || [];
-        renderJobs(jobs);
-        if (jobs.some(function (job) { return job.status === "running"; })) {
-          window.setTimeout(refreshSyncStatus, 3000);
-        }
-      })
-      .catch(function () {});
-  }
-
-  btn.addEventListener("click", function () {
-    var source = btn.getAttribute("data-source") || "all";
-    btn.disabled = true;
-    status.className = "toolbar-status";
-    status.textContent = "Starting sync…";
-
-    fetch("/api/digest/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: source })
-    })
-      .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
-      .then(function (result) {
-        var data = result.data || {};
-        if (!result.ok) throw new Error(data.error || "Sync failed");
-
-        var parts = [];
-        if ((data.started || []).length) {
-          parts.push("Started " + data.started.map(function (item) { return item.label.toLowerCase(); }).join(", "));
-        }
-        if ((data.skipped || []).length) {
-          parts.push("Already running: " + data.skipped.map(function (item) { return item.label.toLowerCase(); }).join(", "));
-        }
-        if ((data.failed || []).length) {
-          parts.push("Failed: " + data.failed.map(function (item) { return item.label.toLowerCase(); }).join(", "));
-        }
-        status.className = "toolbar-status " + ((data.failed || []).length ? "error" : "success");
-        status.textContent = parts.join(" · ") || "Nothing to start";
-        refreshSyncStatus();
-      })
-      .catch(function (err) {
-        status.className = "toolbar-status error";
-        status.textContent = err.message || "Sync failed";
-      })
-      .finally(function () {
-        btn.disabled = false;
-      });
-  });
-
-  refreshSyncStatus();
-})();
 </script>
 </body>
 </html>

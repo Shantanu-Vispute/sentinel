@@ -7,7 +7,6 @@ import sqlite3
 import subprocess
 import threading
 import time
-from collections import Counter
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from zoneinfo import ZoneInfo
@@ -20,6 +19,7 @@ from digest.gmail_auth import get_gmail_service
 from digest.gmail_fetcher import fetch_newsletter_by_id, message_id_from_gmail_url, normalize_email_text
 from digest.sender_signal import sender_signal_for_story
 from digest.story_quality import assess_story_quality
+from digest.bookmarks import list_bookmarks
 
 HERE = pathlib.Path(__file__).resolve().parent
 STORIES_DB_PATH = pathlib.Path(STORIES_DB)
@@ -33,6 +33,7 @@ SYNC_TARGETS = {
         ("social", "Social", SCRIPTS_DIR / "run-social.sh"),
         ("youtube", "YouTube", SCRIPTS_DIR / "run-youtube.sh"),
         ("bestblogs", "BestBlogs", SCRIPTS_DIR / "run-bestblogs.sh"),
+        ("raindrop", "Raindrop", SCRIPTS_DIR / "run-raindrop.sh"),
     ],
     "email": [("email", "Email", SCRIPTS_DIR / "run-email.sh")],
     "telegram": [("telegram", "Telegram", SCRIPTS_DIR / "run-telegram.sh")],
@@ -210,7 +211,6 @@ def _renderable_mention(mention: dict) -> dict:
 
 _HYDRATION_INFLIGHT: set[str] = set()
 _HYDRATION_LOCK = threading.Lock()
-
 
 def _hydrate_email_mentions(conn: sqlite3.Connection, mentions: list[dict]) -> list[dict]:
     cols = _ensure_mentions_raw_columns(conn)
@@ -594,9 +594,10 @@ def _all_sync_statuses() -> list[dict]:
                 continue
             seen.add(key)
             statuses.append(_read_sync_status(key, label))
-    order = {"email": 0, "telegram": 1, "social": 2, "youtube": 3}
+    order = {"email": 0, "telegram": 1, "social": 2, "youtube": 3, "raindrop": 4}
     statuses.sort(key=lambda item: order.get(item["job"], 99))
     return statuses
+
 
 @app.route("/")
 def index():
@@ -613,12 +614,67 @@ def digest_list():
         default_excluded_sources={"bestblogs"},
     )
 
+
+def _nav_source_counts() -> list[dict]:
+    conn = _stories_conn()
+    if conn is None:
+        return []
+    rows = conn.execute(
+        """SELECT COALESCE(source_type, 'email') AS source_type, COUNT(*) AS count
+             FROM stories
+            WHERE COALESCE(skipped, 0) = 0
+         GROUP BY COALESCE(source_type, 'email')"""
+    ).fetchall()
+    counts = {row["source_type"]: row["count"] for row in rows}
+    for story in _load_external_stories(conn):
+        if not story.get("skipped"):
+            source = story.get("source_type") or "external"
+            counts[source] = counts.get(source, 0) + 1
+    conn.close()
+    return [
+        {"source": source, "label": _source_label(source), "count": count}
+        for source, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+@app.route("/bookmarks")
+def bookmarks_view():
+    try:
+        page = max(int(request.args.get("page") or 1), 1)
+    except ValueError:
+        page = 1
+    per_page = 24
+    bookmarks, total = list_bookmarks(page=page, per_page=per_page)
+    has_more = page * per_page < total
+    if (request.args.get("partial") or "").strip() == "1":
+        return render_template(
+            "_bookmark_cards_page.html",
+            bookmarks=bookmarks,
+            page=page,
+            total=total,
+            has_more=has_more,
+        )
+    return render_template(
+        "bookmarks.html",
+        bookmarks=bookmarks,
+        total=total,
+        page=page,
+        per_page=per_page,
+        has_more=has_more,
+        source_counts=_nav_source_counts(),
+    )
+
 def _render_digest_feed(
         nav_active: str,
         feed_path: str,
         default_excluded_sources: frozenset = frozenset()):
     conn = _stories_conn()
     if conn is None:
+        if (request.args.get("format") or "").strip() == "json":
+            return jsonify({
+                "stories": [], "total": 0, "total_all": 0, "source_counts": [],
+                "page": 1, "per_page": 50, "has_more": False,
+            })
         return render_template(
             "digest_list.html",
             stories=[],
@@ -923,6 +979,35 @@ def _render_digest_feed(
             total=total,
         )
 
+    if (request.args.get("format") or "").strip() == "json":
+        json_stories = [
+            {
+                "id": story["id"],
+                "title": story["title"],
+                "summary": story["summary"],
+                "primary_url": story["primary_url"],
+                "primary_url_host": story["primary_url_host"],
+                "mention_count": story["mention_count"],
+                "is_read": story["is_read"],
+                "last_updated_relative": story["last_updated_relative"],
+                "first_seen_relative": story["first_seen_relative"],
+                "source_type": story["source_type"],
+                "source_label": story["source_label"],
+                "primary_image_url": story["primary_image_url"],
+                "skipped": story["skipped"],
+            }
+            for story in page_stories
+        ]
+        return jsonify({
+            "stories": json_stories,
+            "total": total,
+            "total_all": total_unskipped,
+            "source_counts": source_counts,
+            "page": page,
+            "per_page": per_page,
+            "has_more": has_more,
+        })
+
     return render_template(
         "digest_list.html",
         stories=page_stories,
@@ -1090,6 +1175,88 @@ def api_digest_story(story_id: str):
     return jsonify({"story": story,
                     "mentions": mentions,
                     "timeline": timeline})
+
+_CHROMA_COLLECTION = None
+
+def _get_chroma_collection():
+    global _CHROMA_COLLECTION
+    if _CHROMA_COLLECTION is None:
+        import chromadb
+        from digest.storage import CHROMA_PATH
+        client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+        _CHROMA_COLLECTION = client.get_or_create_collection(
+            "stories", metadata={"hnsw:space": "cosine"})
+    return _CHROMA_COLLECTION
+
+@app.route("/api/digest/story/<story_id>/related")
+def api_digest_story_related(story_id: str):
+    try:
+        k = int(request.args.get("k") or 6)
+    except ValueError:
+        k = 6
+    k = max(1, min(k, 20))
+
+    try:
+        collection = _get_chroma_collection()
+        got = collection.get(ids=[story_id], include=["embeddings"])
+        if not got["ids"] or got.get("embeddings") is None or len(got["embeddings"]) == 0:
+            return jsonify({"stories": []})
+        embedding = got["embeddings"][0]
+        results = collection.query(query_embeddings=[embedding], n_results=k + 1)
+    except Exception:
+        return jsonify({"stories": []})
+
+    candidate_ids = results["ids"][0] if results and results.get("ids") else []
+    distances = results["distances"][0] if results and results.get("distances") else []
+    ranked = [
+        (cid, 1 - dist) for cid, dist in zip(candidate_ids, distances) if cid != story_id
+    ]
+    if not ranked:
+        return jsonify({"stories": []})
+
+    conn = _stories_conn()
+    if conn is None:
+        return jsonify({"stories": []})
+    placeholders = ",".join("?" for _ in ranked)
+    rows = conn.execute(
+        f"""SELECT id, title, summary, primary_url, primary_url_host,
+                   mention_count, is_read, first_seen, last_updated,
+                   COALESCE(skipped, 0) AS skipped,
+                   COALESCE(source_type, 'email') AS source_type,
+                   COALESCE(primary_image_url, '') AS primary_image_url
+              FROM stories
+             WHERE id IN ({placeholders})""",
+        [cid for cid, _ in ranked],
+    ).fetchall()
+    conn.close()
+
+    row_by_id = {row["id"]: row for row in rows}
+    related = []
+    for cid, similarity in ranked:
+        row = row_by_id.get(cid)
+        if row is None or row["skipped"]:
+            continue
+        source_type = row["source_type"]
+        related.append({
+            "id": row["id"],
+            "title": row["title"],
+            "summary": row["summary"] or "",
+            "primary_url": row["primary_url"] or "",
+            "primary_url_host": row["primary_url_host"] or "",
+            "mention_count": row["mention_count"] or 0,
+            "is_read": bool(row["is_read"]),
+            "last_updated_relative": _relative_time_label(row["last_updated"] or ""),
+            "first_seen_relative": _relative_time_label(row["first_seen"] or ""),
+            "source_type": source_type,
+            "source_label": _source_label(source_type),
+            "primary_image_url": row["primary_image_url"] or "",
+            "skipped": bool(row["skipped"]),
+            "similarity": round(similarity, 4),
+        })
+        if len(related) >= k:
+            break
+
+    return jsonify({"stories": related})
 
 @app.route("/api/digest/search-index")
 def digest_search_index():

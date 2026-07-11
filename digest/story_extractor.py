@@ -273,16 +273,6 @@ def _extract_from_single(newsletter: Newsletter) -> list[Story]:
     except Exception as _e:
         pass
 
-    try:
-        from digest.image_extractor import pick_primary_image
-        images = getattr(newsletter, "images", None) or []
-        for story in parsed:
-            image_url = pick_primary_image(story.title, story.summary, images)
-            if image_url:
-                story.primary_image_url = image_url
-    except Exception as _e:
-        pass
-
     return parsed
 
 def _parse_response(result: dict, newsletter: Newsletter) -> list[Story]:

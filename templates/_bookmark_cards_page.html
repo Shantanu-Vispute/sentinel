@@ -1,0 +1,14 @@
+<div data-has-more="{{ '1' if has_more else '0' }}" data-page="{{ page }}" data-total="{{ total }}">
+{% for b in bookmarks %}
+<a class="card" href="{{ b.url }}" target="_blank" rel="noopener">
+  {% if b.cover %}<img class="cover" src="{{ b.cover }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+  {% else %}<div class="cover empty">{{ (b.title or '?')[:1] | upper }}</div>{% endif %}
+  <div class="body">
+    <div class="domain">{{ b.domain or b.url }}</div>
+    <h2 class="title">{{ b.title or b.url }}</h2>
+    {% if b.excerpt %}<div class="excerpt">{{ b.excerpt }}</div>{% endif %}
+    <div class="meta">{{ b.folder or 'Unsorted' }}{% if b.tags %} · {{ b.tags }}{% endif %}</div>
+  </div>
+</a>
+{% endfor %}
+</div>

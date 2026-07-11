@@ -76,23 +76,6 @@ to the path in `SENDER_SIGNALS_PATH` (default `state/sender_signals.json`,
 which is gitignored) and fill in your own senders and weights. If the file
 is missing, all senders are treated as neutral.
 
-## Explore
-
-The `/explore` page reads BestBlogs through Sentinel's backend proxy:
-
-```bash
-/api/explore/resources?page=1&pageSize=10&timeFilter=1w&language=all&category=ai&sort=time_desc&type=ARTICLE
-```
-
-Sentinel maps UI-friendly values to the BestBlogs API:
-
-```text
-category=ai          -> category=Artificial_Intelligence
-sort=time_desc       -> sortType=time_desc
-type=article         -> type=ARTICLE
-sourceid=653b2e      -> sourceId=SOURCE_653b2e
-```
-
 ## Platform Login
 
 ### Gmail
@@ -280,8 +263,13 @@ python -m digest.daemon --since 2026-04-01
 python -m digest.daemon --telegram
 python -m ingest.social_scraper --all
 python -m ingest.youtube_sync
+python -m ingest.raindrop_sync
 flask --app app run --host 127.0.0.1 --port 5000
 ```
+
+Raindrop sync uses `RAINDROP_TOKEN` and writes to `state/bookmarks.db`. Run
+`scripts/install-cron.sh` after configuring `.env` to schedule it with the
+other ingestion jobs.
 
 ## Testing
 

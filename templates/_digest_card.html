@@ -2,7 +2,7 @@
 <div class="story-card {% if not s.is_read %}unread{% endif %} has-image" data-story-id="{{ s.id }}" role="button" tabindex="0">
   <span class="source-chip">{{ s.source_label or s.source_type }}</span>
   <button class="read-btn" data-read title="Skip">✕</button>
-  {% if s.primary_image_url %}
+  {% if s.primary_image_url and s.source_type != 'email' %}
     <img class="card-thumb" src="{{ s.primary_image_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
   {% else %}
     <div class="card-thumb-placeholder">{{ (s.title or '?') | trim | first | upper }}</div>

@@ -20,7 +20,6 @@ class Newsletter:
     snippet: str
     gmail_url: str = ""
     links: list[dict] = None
-    images: list[dict] = None
 
     def __post_init__(self):
         if not self.gmail_url and self.id:
@@ -305,18 +304,12 @@ def _parse_message(msg: dict) -> Newsletter | None:
 
     raw_html = _collect_html(payload)
     links = []
-    images = []
     if raw_html:
         try:
             from digest.link_extractor import extract_links_from_html
             links = extract_links_from_html(raw_html)
         except Exception:
             links = []
-        try:
-            from digest.image_extractor import extract_images_from_html
-            images = extract_images_from_html(raw_html)
-        except Exception:
-            images = []
 
     return Newsletter(
         id=msg["id"],
@@ -326,7 +319,6 @@ def _parse_message(msg: dict) -> Newsletter | None:
         body=normalize_email_text(body),
         snippet=snippet,
         links=links,
-        images=images,
     )
 
 def _collect_html(payload: dict) -> str:

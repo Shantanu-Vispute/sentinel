@@ -15,12 +15,13 @@ TELEGRAM_SCHEDULE="${CRON_TELEGRAM_SCHEDULE:-*/15 * * * *}"
 SOCIAL_SCHEDULE="${CRON_SOCIAL_SCHEDULE:-*/30 * * * *}"
 YOUTUBE_SCHEDULE="${CRON_YOUTUBE_SCHEDULE:-5 * * * *}"
 BESTBLOGS_SCHEDULE="${CRON_BESTBLOGS_SCHEDULE:-*/15 * * * *}"
+RAINDROP_SCHEDULE="${CRON_RAINDROP_SCHEDULE:-*/30 * * * *}"
 X_LINKS_SCHEDULE="${CRON_X_LINKS_SCHEDULE:-0 * * * *}"
 BEGIN_MARKER="sentinel cron begin"
 END_MARKER="sentinel cron end"
 TMP_FILE="$(mktemp)"
 
-chmod +x "$ROOT/scripts/run-email.sh" "$ROOT/scripts/run-telegram.sh" "$ROOT/scripts/run-social.sh" "$ROOT/scripts/run-youtube.sh" "$ROOT/scripts/run-bestblogs.sh" "$ROOT/scripts/run-x-links.sh"
+chmod +x "$ROOT/scripts/run-email.sh" "$ROOT/scripts/run-telegram.sh" "$ROOT/scripts/run-social.sh" "$ROOT/scripts/run-youtube.sh" "$ROOT/scripts/run-bestblogs.sh" "$ROOT/scripts/run-raindrop.sh" "$ROOT/scripts/run-x-links.sh"
 
 if crontab -l > "$TMP_FILE" 2>/dev/null; then
   awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
@@ -44,6 +45,7 @@ fi
   printf '%s %q\n' "$SOCIAL_SCHEDULE" "$ROOT/scripts/run-social.sh"
   printf '%s %q\n' "$YOUTUBE_SCHEDULE" "$ROOT/scripts/run-youtube.sh"
   printf '%s %q\n' "$BESTBLOGS_SCHEDULE" "$ROOT/scripts/run-bestblogs.sh"
+  printf '%s %q\n' "$RAINDROP_SCHEDULE" "$ROOT/scripts/run-raindrop.sh"
   printf '%s %q\n' "$X_LINKS_SCHEDULE" "$ROOT/scripts/run-x-links.sh"
   printf '# %s\n' "$END_MARKER"
 } | crontab -

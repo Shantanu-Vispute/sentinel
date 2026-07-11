@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sentinel · Bookmarks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap" rel="stylesheet">
+<style>
+:root { --bg:#FAF9F5; --surface:#F3EFE6; --border:#E7E1D4; --border-strong:#D7CFBD; --text:#1F1E1D; --muted:#6B6660; --subtle:#94908A; --accent:#C15F3C; }
+html[data-theme="dark"] { --bg:#262624; --surface:#2F2E2B; --border:#3A3936; --border-strong:#4A4844; --text:#EDE9DE; --muted:#B4ADA0; --subtle:#857F72; --accent:#D97757; }
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; }
+body { font-family:"Inter",system-ui,sans-serif; background:var(--bg); color:var(--text); -webkit-font-smoothing:antialiased; }
+.topbar { display:flex; align-items:center; gap:20px; padding:14px 32px; border-bottom:1px solid var(--border); background:var(--surface); position:sticky; top:0; z-index:10; }
+.topbar-logo { display:inline-flex; width:20px; height:20px; color:var(--text); flex-shrink:0; }
+.topbar-logo svg { width:20px; height:20px; }
+.topbar-spacer { width:20px; flex-shrink:0; }
+.nav-tabs { display:flex; gap:24px; align-items:center; flex:1; justify-content:center; overflow-x:auto; scrollbar-width:none; }
+.nav-tabs::-webkit-scrollbar { display:none; }
+.nav-tabs a { color:var(--subtle); text-decoration:none; white-space:nowrap; padding:4px 2px 6px; border-bottom:2px solid transparent; font-size:14px; font-weight:500; }
+.nav-tabs a:hover,.nav-tabs a.active { color:var(--text); }
+.nav-tabs a.active { font-weight:600; border-bottom-color:var(--accent); }
+.main { padding:32px 48px 100px; }
+.page-header { margin-bottom:22px; }
+.page-header h1 { margin:0 0 4px; font-size:26px; letter-spacing:-.03em; }
+.subtitle { color:var(--subtle); font-size:14px; }
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(369px,1fr)); gap:18px; }
+.card { display:flex; flex-direction:column; height:380px; overflow:hidden; color:inherit; text-decoration:none; background:var(--surface); border:1px solid var(--border); border-radius:12px; transition:border-color 120ms,transform 120ms,box-shadow 120ms; }
+.card:hover { border-color:var(--border-strong); transform:translateY(-1px); box-shadow:0 6px 18px rgba(0,0,0,.08); }
+.cover { width:100%; height:160px; object-fit:cover; display:block; background:var(--border); }
+.cover.empty { display:flex; align-items:center; justify-content:center; color:var(--subtle); font-family:"Source Serif 4",Georgia,serif; font-size:56px; font-weight:600; text-decoration:underline; text-underline-offset:6px; }
+.body { display:flex; flex:1; flex-direction:column; gap:10px; padding:16px 18px 18px; }
+.domain { color:var(--muted); font-size:12px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.title { margin:0; font-size:16px; line-height:1.3; font-weight:700; }
+.excerpt { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; color:var(--muted); font-size:13px; line-height:1.45; }
+.meta { margin-top:auto; color:var(--subtle); font-size:11px; }
+.empty { padding:80px 20px; text-align:center; color:var(--subtle); }
+.infinite-loader { min-height:56px; display:flex; align-items:center; justify-content:center; padding:28px 12px 48px; color:var(--subtle); font-size:13px; }
+.infinite-loader[hidden] { display:none; }
+@media (max-width:860px) { .main { padding:20px 20px 80px; } .topbar { padding:12px 20px; } }
+</style>
+<script>
+(function () {
+  var saved = localStorage.getItem("theme");
+  if (saved === "dark" || (saved === null && window.matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.setAttribute("data-theme", "dark");
+  document.addEventListener("keydown", function (e) {
+    if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.key.toLowerCase() !== "d") return;
+    if (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) return;
+    var html = document.documentElement;
+    var dark = html.getAttribute("data-theme") === "dark";
+    if (dark) html.removeAttribute("data-theme"); else html.setAttribute("data-theme", "dark");
+    localStorage.setItem("theme", dark ? "light" : "dark");
+  });
+})();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <a class="topbar-logo" href="/home" aria-label="Sentinel home">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="10.3" y="1" width="3.4" height="22" rx="1.7" />
+      <rect x="10.3" y="1" width="3.4" height="22" rx="1.7" transform="rotate(60 12 12)" />
+      <rect x="10.3" y="1" width="3.4" height="22" rx="1.7" transform="rotate(120 12 12)" />
+    </svg>
+  </a>
+  <nav class="nav-tabs">
+    <a href="/home">For You</a>
+    <a href="/digest">Following</a>
+    {% for item in source_counts if item.source not in ('bestblogs', 'youtube') %}
+    <a href="/home?source={{ item.source }}">{{ item.label }}</a>
+    {% endfor %}
+    <a href="/bookmarks" class="active">Bookmarks</a>
+  </nav>
+  <div class="topbar-spacer" aria-hidden="true"></div>
+</header>
+<main class="main">
+  <header class="page-header">
+    <h1>Bookmarks</h1>
+    <div class="subtitle">{{ total }} saved links</div>
+  </header>
+  {% if bookmarks %}
+  <div class="grid">
+    {% for b in bookmarks %}
+    <a class="card" href="{{ b.url }}" target="_blank" rel="noopener">
+      {% if b.cover %}<img class="cover" src="{{ b.cover }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+      {% else %}<div class="cover empty">{{ (b.title or '?')[:1] | upper }}</div>{% endif %}
+      <div class="body">
+        <div class="domain">{{ b.domain or b.url }}</div>
+        <h2 class="title">{{ b.title or b.url }}</h2>
+        {% if b.excerpt %}<div class="excerpt">{{ b.excerpt }}</div>{% endif %}
+        <div class="meta">{{ b.folder or 'Unsorted' }}{% if b.tags %} · {{ b.tags }}{% endif %}</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<div class="empty">No bookmarks found.</div>{% endif %}
+  {% if bookmarks %}
+  <div class="infinite-loader" id="bookmarkLoader"
+       data-next-page="{{ page + 1 }}"
+       data-has-more="{{ '1' if has_more else '0' }}"
+       {% if not has_more %}hidden{% endif %}
+       aria-live="polite">Loading more bookmarks…</div>
+  {% endif %}
+</main>
+<script>
+(function () {
+  var grid = document.querySelector(".grid");
+  var loader = document.getElementById("bookmarkLoader");
+  if (!grid || !loader) return;
+
+  var loading = false;
+  var hasMore = loader.getAttribute("data-has-more") === "1";
+  var nextPage = parseInt(loader.getAttribute("data-next-page") || "2", 10);
+
+  function finish(done) {
+    if (!done) return;
+    loader.setAttribute("hidden", "");
+    if (observer) observer.disconnect();
+  }
+
+  function loadMore() {
+    if (loading || !hasMore) return;
+    loading = true;
+    loader.removeAttribute("hidden");
+    loader.textContent = "Loading more bookmarks…";
+    fetch("/bookmarks?partial=1&page=" + nextPage, { headers: { "X-Requested-With": "fetch" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error("Could not load more bookmarks");
+        return response.text();
+      })
+      .then(function (html) {
+        var tmp = document.createElement("div");
+        tmp.innerHTML = html.trim();
+        var payload = tmp.firstElementChild;
+        if (!payload) throw new Error("Empty response");
+        Array.prototype.slice.call(payload.querySelectorAll(".card")).forEach(function (card) {
+          grid.appendChild(card);
+        });
+        hasMore = payload.getAttribute("data-has-more") === "1";
+        nextPage = parseInt(payload.getAttribute("data-page") || String(nextPage), 10) + 1;
+        loader.setAttribute("data-next-page", String(nextPage));
+        loader.setAttribute("data-has-more", hasMore ? "1" : "0");
+        finish(!hasMore);
+      })
+      .catch(function (error) {
+        loader.textContent = error.message || "Could not load more bookmarks";
+      })
+      .finally(function () { loading = false; });
+  }
+
+  if (!hasMore) { finish(true); return; }
+  var observer = null;
+  if ("IntersectionObserver" in window) {
+    observer = new IntersectionObserver(function (entries) {
+      if (entries.some(function (entry) { return entry.isIntersecting; })) loadMore();
+    }, { rootMargin: "900px 0px" });
+    observer.observe(loader);
+  } else {
+    window.addEventListener("scroll", function () {
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 900) loadMore();
+    });
+    loadMore();
+  }
+})();
+</script>
+</body>
+</html>

@@ -74,6 +74,11 @@ TELEGRAM_SESSION_PATH = _path_env(
 
 SENTINEL_PII_PATTERNS = _csv_env("SENTINEL_PII_PATTERNS", [])
 STORIES_DB = _path_env("STORIES_DB", HERE / "state" / "stories.db")
+BOOKMARKS_DB = _path_env("BOOKMARKS_DB", HERE / "state" / "bookmarks.db")
+RAINDROP_TOKEN = os.getenv("RAINDROP_TOKEN", "").strip()
+RAINDROP_API_BASE = os.getenv(
+    "RAINDROP_API_BASE", "https://api.raindrop.io/rest/v1"
+).rstrip("/")
 GMAIL_CREDENTIALS_PATH = _path_env(
     "GMAIL_CREDENTIALS_PATH", HERE / "state" / "credentials.json"
 )
