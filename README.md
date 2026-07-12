@@ -219,10 +219,13 @@ http://127.0.0.1:5000/digest?source=youtube
 Configure schedules in `.env`:
 
 ```bash
-CRON_EMAIL_SCHEDULE="*/15 * * * *"
-CRON_TELEGRAM_SCHEDULE="*/15 * * * *"
-CRON_SOCIAL_SCHEDULE="*/30 * * * *"
-CRON_YOUTUBE_SCHEDULE="5 * * * *"
+CRON_EMAIL_SCHEDULE="*/5 * * * *"
+CRON_TELEGRAM_SCHEDULE="*/5 * * * *"
+CRON_SOCIAL_SCHEDULE="*/5 * * * *"
+CRON_YOUTUBE_SCHEDULE="*/5 * * * *"
+CRON_BESTBLOGS_SCHEDULE="*/5 * * * *"
+CRON_RAINDROP_SCHEDULE="*/5 * * * *"
+CRON_X_LINKS_SCHEDULE="*/5 * * * *"
 ```
 
 Install cron jobs:

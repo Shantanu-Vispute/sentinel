@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-# Routine (non-backfill) Telegram polls run every 15 minutes via cron and
+# Routine (non-backfill) Telegram polls run every 5 minutes via cron and
 # normally finish in well under a minute. Telethon's reconnect logic can
 # hang indefinitely on some network failures without ever raising, which
 # would otherwise wedge the lock file indefinitely and silently block every
