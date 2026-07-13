@@ -209,6 +209,20 @@ def _persist_story(
                 except Exception as exc:
                     print(f"      image backfill failed: {exc}")
 
+        # links_json is otherwise only ever set once, at story creation — a
+        # story that started from one source's links never picks up the
+        # distinct links every later merged mention cites. Union them in.
+        if existing and links:
+            try:
+                existing_links = json.loads(existing.get("links_json") or "[]")
+            except Exception:
+                existing_links = []
+            merged_links = existing_links + [
+                link for link in links if link not in existing_links
+            ]
+            if merged_links != existing_links:
+                db.update_story_links(existing_id, json.dumps(merged_links))
+
         if adds_new_info and what_changed:
             new_summary = updated_summary if updated_summary else f"{
                 existing['summary']} {what_changed}"
@@ -493,11 +507,16 @@ def _bestblogs_item_id(item: dict) -> str:
     raw_id = str(item.get("id") or item.get("readUrl") or item.get("url") or "")
     return f"BB_{raw_id}" if raw_id else ""
 
+_CST = timezone(timedelta(hours=8))
+
 def _bestblogs_item_dt(item: dict) -> datetime | None:
     raw = item.get("publishDateTimeStr") or ""
     if raw and raw != "Today":
         try:
-            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            # BestBlogs' publishDateTimeStr is China Standard Time (UTC+8),
+            # not UTC — convert rather than relabel, or timestamps end up
+            # hours in the future.
+            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_CST).astimezone(timezone.utc)
         except Exception:
             pass
     ts = item.get("publishTimeStamp")

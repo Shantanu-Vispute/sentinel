@@ -762,7 +762,11 @@ def _render_digest_feed(
         ts = _parse_iso_ts(row["last_updated"])
         latest_mention_dt = latest_mention_dt_by_story.get(row["id"])
         source_type = (row["source_type"] or "email").strip().lower()
-        if source_type == "email" and latest_mention_dt is not None:
+        # Use the latest actual mention/publish date for the displayed
+        # recency whenever we have one, not just for email — otherwise a
+        # bestblogs/telegram story's card shows ingestion time while its own
+        # mention list shows publish time, which can disagree by hours.
+        if latest_mention_dt is not None:
             ts = int(latest_mention_dt.timestamp())
             display_time = latest_mention_dt.astimezone(APP_TIMEZONE).isoformat()
             display_relative = _relative_time_label_dt(latest_mention_dt)

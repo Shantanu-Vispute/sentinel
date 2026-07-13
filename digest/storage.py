@@ -2,7 +2,7 @@ import sqlite3
 import chromadb
 import uuid
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from config import STORIES_DB
 
@@ -167,7 +167,7 @@ class StoryDB:
         content_hash: str = "",
     ) -> str:
         story_id = str(uuid.uuid4())
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
 
         host = ""
         if primary_url:
@@ -223,7 +223,7 @@ class StoryDB:
         raw_title: str = "",
         raw_body: str = "",
     ):
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         self.conn.execute(
             """INSERT INTO mentions
                (story_id, title, summary, raw_title, raw_body, sender, gmail_url, date, created_at, added_new_info, source_type)
@@ -237,7 +237,7 @@ class StoryDB:
         self.conn.commit()
 
     def update_story_summary(self, story_id: str, new_summary: str):
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         self.conn.execute(
             "UPDATE stories SET summary = ?, last_updated = ? WHERE id = ?",
             (new_summary, now, story_id),
@@ -255,6 +255,13 @@ class StoryDB:
         self.conn.execute(
             "UPDATE stories SET primary_image_url = ? WHERE id = ?",
             (primary_image_url, story_id),
+        )
+        self.conn.commit()
+
+    def update_story_links(self, story_id: str, links_json: str):
+        self.conn.execute(
+            "UPDATE stories SET links_json = ? WHERE id = ?",
+            (links_json, story_id),
         )
         self.conn.commit()
 
@@ -334,12 +341,12 @@ class StoryDB:
     def mark_x_links_scanned(self, story_id: str):
         self.conn.execute(
             "UPDATE stories SET x_links_scanned_at = ? WHERE id = ?",
-            (datetime.now().isoformat(), story_id),
+            (datetime.now(timezone.utc).isoformat(), story_id),
         )
         self.conn.commit()
 
     def add_x_links(self, story_id: str, links: list[dict], discovered_via: str):
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         for link in links:
             self.conn.execute(
                 """INSERT OR IGNORE INTO story_x_links
