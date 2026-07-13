@@ -448,7 +448,12 @@ html:not([data-theme="dark"]) .moon { display: none; }
         (host ? '<img class="favicon" src="https://www.google.com/s2/favicons?domain=' + escape(host) + '&sz=32" alt="">' : '') +
         'read on ' + escape(host || "source") + ' →</a>'
       : '';
-    var isTelegram = story.source_type === "telegram";
+    // story.source_type reflects only how the story was first created —
+    // a story that started as a lone Telegram post can later have email
+    // mentions merged into it by clustering. Gate the compact Telegram view
+    // on whether every mention is still telegram-only, not the static field.
+    var isTelegram = (mentions || []).length > 0 &&
+      (mentions || []).every(function (m) { return m.source_type === "telegram"; });
     var heroImg = story.source_type !== "email" && story.primary_image_url
       ? '<img class="mhero" src="' + escape(story.primary_image_url) + '" alt="" referrerpolicy="no-referrer">'
       : '';
