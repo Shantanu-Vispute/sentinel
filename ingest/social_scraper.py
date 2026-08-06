@@ -6,6 +6,7 @@ import random
 import re
 import sqlite3
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -28,6 +29,8 @@ LAUNCH_ARGS = [
     "--no-sandbox",
     "--disable-blink-features=AutomationControlled",
 ]
+
+SHUTDOWN_TIMEOUT = 60.0
 
 def log(msg: str) -> None:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -131,6 +134,35 @@ def _pause(min_s: float, max_s: float) -> None:
 def _scroll(page: Page) -> None:
     page.evaluate("window.scrollBy(0, 4000)")
     _pause(1.2, 2.0)
+
+def shutdown(pw, ctx, exit_code: int) -> None:
+    """Close the browser without letting teardown wedge the run.
+
+    launch_persistent_context's close can block forever, and the cron runner
+    holds its lock for as long as this process lives — one hang silently stops
+    every later run. Everything scraped is already committed by upsert(), so
+    there is nothing to flush: give teardown a bounded window, then bail.
+    """
+    done = threading.Event()
+
+    # The close has to run on this thread — playwright's sync API is greenlet
+    # bound and rejects calls from anywhere else. So the watchdog only waits,
+    # and kills the process outright if the close never comes back.
+    def watchdog() -> None:
+        if not done.wait(SHUTDOWN_TIMEOUT):
+            log(f"shutdown: browser teardown hung >{SHUTDOWN_TIMEOUT:.0f}s — exiting anyway")
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(exit_code)
+
+    threading.Thread(target=watchdog, daemon=True).start()
+    try:
+        ctx.close()
+        pw.stop()
+    except Exception as e:
+        log(f"shutdown: teardown failed — {e}")
+    finally:
+        done.set()
 
 def launch(headless: bool = True) -> tuple:
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
@@ -806,8 +838,7 @@ def main():
                 log(f"{src}: FAILED — {e}")
                 failed = True
     finally:
-        ctx.close()
-        pw.stop()
+        shutdown(pw, ctx, 1 if failed else 0)
     if failed:
         sys.exit(1)
 
