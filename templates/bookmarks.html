@@ -17,6 +17,10 @@ body { font-family:"Inter",system-ui,sans-serif; background:var(--bg); color:var
 .topbar-logo { display:inline-flex; width:20px; height:20px; color:var(--text); flex-shrink:0; }
 .topbar-logo svg { width:20px; height:20px; }
 .topbar-spacer { width:20px; flex-shrink:0; }
+.theme-toggle { background:var(--surface); border:1px solid var(--border); color:var(--muted); width:36px; height:36px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; }
+.theme-toggle:hover { color:var(--accent); border-color:var(--accent); }
+html[data-theme="dark"] .sun { display:none; }
+html:not([data-theme="dark"]) .moon { display:none; }
 .nav-tabs { display:flex; gap:24px; align-items:center; flex:1; justify-content:center; overflow-x:auto; scrollbar-width:none; }
 .nav-tabs::-webkit-scrollbar { display:none; }
 .nav-tabs a { color:var(--subtle); text-decoration:none; white-space:nowrap; padding:4px 2px 6px; border-bottom:2px solid transparent; font-size:14px; font-weight:500; }
@@ -45,6 +49,18 @@ body { font-family:"Inter",system-ui,sans-serif; background:var(--bg); color:var
 (function () {
   var saved = localStorage.getItem("theme");
   if (saved === "dark" || (saved === null && window.matchMedia("(prefers-color-scheme: dark)").matches)) document.documentElement.setAttribute("data-theme", "dark");
+  document.addEventListener("DOMContentLoaded", function () {
+    var button = document.getElementById("themeToggle");
+    if (!button) return;
+    button.addEventListener("click", function () {
+      var html = document.documentElement;
+      var dark = html.getAttribute("data-theme") === "dark";
+      if (dark) html.removeAttribute("data-theme"); else html.setAttribute("data-theme", "dark");
+      localStorage.setItem("theme", dark ? "light" : "dark");
+      button.setAttribute("aria-label", dark ? "Switch to dark mode" : "Switch to light mode");
+    });
+    button.setAttribute("aria-label", document.documentElement.getAttribute("data-theme") === "dark" ? "Switch to light mode" : "Switch to dark mode");
+  });
   document.addEventListener("keydown", function (e) {
     if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.key.toLowerCase() !== "d") return;
     if (e.target && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName))) return;
@@ -68,12 +84,16 @@ body { font-family:"Inter",system-ui,sans-serif; background:var(--bg); color:var
   <nav class="nav-tabs">
     <a href="/home">For You</a>
     <a href="/digest">Following</a>
-    {% for item in source_counts if item.source not in ('bestblogs', 'youtube') %}
+    {% for item in source_counts if item.source != 'youtube' %}
     <a href="/home?source={{ item.source }}">{{ item.label }}</a>
     {% endfor %}
     <a href="/bookmarks" class="active">Bookmarks</a>
   </nav>
   <div class="topbar-spacer" aria-hidden="true"></div>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" title="Toggle light and dark mode">
+    <span class="sun" aria-hidden="true">☀</span>
+    <span class="moon" aria-hidden="true">☾</span>
+  </button>
 </header>
 <main class="main">
   <header class="page-header">

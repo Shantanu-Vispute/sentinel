@@ -11,4 +11,4 @@ fi
 
 mkdir -p "$ROOT/state"
 cd "$ROOT"
-exec "$RUNNER" bestblogs "$ROOT/state/bestblogs.log" "BestBlogs sync" "$PYTHON" -u -m digest.daemon --bestblogs
+exec "$RUNNER" slack "$ROOT/state/slack.log" "Slack delivery" "$PYTHON" -u -m digest.slack_delivery --run

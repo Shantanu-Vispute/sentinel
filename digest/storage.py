@@ -59,6 +59,7 @@ class StoryDB:
                 date           TEXT NOT NULL,
                 what_changed   TEXT NOT NULL,
                 trigger_sender TEXT,
+                mention_id     INTEGER,
                 FOREIGN KEY (story_id) REFERENCES stories(id)
             );
 
@@ -86,6 +87,49 @@ class StoryDB:
                 ON timeline_entries(story_id);
             CREATE INDEX IF NOT EXISTS idx_story_x_links_story
                 ON story_x_links(story_id);
+
+            CREATE TABLE IF NOT EXISTS slack_outbox (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_key        TEXT NOT NULL UNIQUE,
+                event_type       TEXT NOT NULL,
+                entity_type      TEXT NOT NULL,
+                entity_id        TEXT NOT NULL,
+                story_id         TEXT,
+                source_type      TEXT NOT NULL,
+                channel_id       TEXT NOT NULL,
+                payload_json     TEXT NOT NULL,
+                parent_event_key TEXT,
+                event_ts         INTEGER NOT NULL,
+                status           TEXT NOT NULL DEFAULT 'pending',
+                attempt_count    INTEGER NOT NULL DEFAULT 0,
+                available_at     TEXT,
+                last_error       TEXT,
+                slack_ts         TEXT,
+                locked_at        TEXT,
+                created_at       TEXT NOT NULL,
+                sent_at          TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS slack_roots (
+                entity_type TEXT NOT NULL,
+                entity_id   TEXT NOT NULL,
+                channel_id  TEXT NOT NULL,
+                root_ts     TEXT NOT NULL,
+                permalink   TEXT,
+                created_at  TEXT NOT NULL,
+                PRIMARY KEY (entity_type, entity_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS slack_state (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_slack_outbox_ready
+                ON slack_outbox(status, available_at, event_ts, id);
+            CREATE INDEX IF NOT EXISTS idx_slack_outbox_entity
+                ON slack_outbox(entity_type, entity_id);
         """)
 
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(stories)")}
@@ -114,6 +158,7 @@ class StoryDB:
         if "x_links_scanned_at" not in cols:
             self.conn.execute(
                 "ALTER TABLE stories ADD COLUMN x_links_scanned_at TEXT")
+        self._init_search_index()
         mcols = {r[1]
                  for r in self.conn.execute("PRAGMA table_info(mentions)")}
         if "source_type" not in mcols:
@@ -123,7 +168,99 @@ class StoryDB:
             self.conn.execute("ALTER TABLE mentions ADD COLUMN raw_title TEXT")
         if "raw_body" not in mcols:
             self.conn.execute("ALTER TABLE mentions ADD COLUMN raw_body TEXT")
+        tcols = {
+            r[1] for r in self.conn.execute("PRAGMA table_info(timeline_entries)")
+        }
+        if "mention_id" not in tcols:
+            self.conn.execute(
+                "ALTER TABLE timeline_entries ADD COLUMN mention_id INTEGER"
+            )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_timeline_mention ON timeline_entries(mention_id)"
+        )
         self.conn.commit()
+
+    def _init_search_index(self):
+        """Create and maintain the local FTS5 story index."""
+        try:
+            self.conn.execute(
+                """CREATE VIRTUAL TABLE IF NOT EXISTS stories_fts USING fts5(
+                       story_id UNINDEXED,
+                       title,
+                       summary,
+                       sender,
+                       category,
+                       entities
+                   )"""
+            )
+            self.conn.executescript(
+                """
+                CREATE TRIGGER IF NOT EXISTS stories_fts_ai AFTER INSERT ON stories BEGIN
+                    INSERT INTO stories_fts(story_id, title, summary, sender, category, entities)
+                    SELECT NEW.id, NEW.title, NEW.summary,
+                           COALESCE((SELECT group_concat(sender, ' ') FROM mentions WHERE story_id = NEW.id), ''),
+                           COALESCE(NEW.category, ''), COALESCE(NEW.entities, '');
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS stories_fts_au
+                AFTER UPDATE OF title, summary, category, entities ON stories BEGIN
+                    DELETE FROM stories_fts WHERE story_id = OLD.id;
+                    INSERT INTO stories_fts(story_id, title, summary, sender, category, entities)
+                    SELECT NEW.id, NEW.title, NEW.summary,
+                           COALESCE((SELECT group_concat(sender, ' ') FROM mentions WHERE story_id = NEW.id), ''),
+                           COALESCE(NEW.category, ''), COALESCE(NEW.entities, '');
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS stories_fts_ad AFTER DELETE ON stories BEGIN
+                    DELETE FROM stories_fts WHERE story_id = OLD.id;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS mentions_fts_ai AFTER INSERT ON mentions BEGIN
+                    DELETE FROM stories_fts WHERE story_id = NEW.story_id;
+                    INSERT INTO stories_fts(story_id, title, summary, sender, category, entities)
+                    SELECT s.id, s.title, s.summary,
+                           COALESCE((SELECT group_concat(sender, ' ') FROM mentions WHERE story_id = s.id), ''),
+                           COALESCE(s.category, ''), COALESCE(s.entities, '')
+                      FROM stories s WHERE s.id = NEW.story_id;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS mentions_fts_au
+                AFTER UPDATE OF sender, title, summary ON mentions BEGIN
+                    DELETE FROM stories_fts WHERE story_id = NEW.story_id;
+                    INSERT INTO stories_fts(story_id, title, summary, sender, category, entities)
+                    SELECT s.id, s.title, s.summary,
+                           COALESCE((SELECT group_concat(sender, ' ') FROM mentions WHERE story_id = s.id), ''),
+                           COALESCE(s.category, ''), COALESCE(s.entities, '')
+                      FROM stories s WHERE s.id = NEW.story_id;
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS mentions_fts_ad AFTER DELETE ON mentions BEGIN
+                    DELETE FROM stories_fts WHERE story_id = OLD.story_id;
+                    INSERT INTO stories_fts(story_id, title, summary, sender, category, entities)
+                    SELECT s.id, s.title, s.summary,
+                           COALESCE((SELECT group_concat(sender, ' ') FROM mentions WHERE story_id = s.id), ''),
+                           COALESCE(s.category, ''), COALESCE(s.entities, '')
+                      FROM stories s WHERE s.id = OLD.story_id;
+                END;
+                """
+            )
+
+            story_count = self.conn.execute("SELECT COUNT(*) FROM stories").fetchone()[0]
+            index_count = self.conn.execute("SELECT COUNT(*) FROM stories_fts").fetchone()[0]
+            if story_count != index_count:
+                self.conn.execute("DELETE FROM stories_fts")
+                self.conn.execute(
+                    """INSERT INTO stories_fts(story_id, title, summary, sender, category, entities)
+                       SELECT s.id, s.title, s.summary,
+                              COALESCE(group_concat(m.sender, ' '), ''),
+                              COALESCE(s.category, ''), COALESCE(s.entities, '')
+                         FROM stories s
+                         LEFT JOIN mentions m ON m.story_id = s.id
+                        GROUP BY s.id"""
+                )
+        except sqlite3.OperationalError:
+            # Keep ingestion usable if an older SQLite build lacks FTS5.
+            pass
 
     def find_similar(
             self,
@@ -222,9 +359,9 @@ class StoryDB:
         source_type: str = "email",
         raw_title: str = "",
         raw_body: str = "",
-    ):
+    ) -> int:
         now = datetime.now(timezone.utc).isoformat()
-        self.conn.execute(
+        cursor = self.conn.execute(
             """INSERT INTO mentions
                (story_id, title, summary, raw_title, raw_body, sender, gmail_url, date, created_at, added_new_info, source_type)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -235,6 +372,7 @@ class StoryDB:
             (now, story_id),
         )
         self.conn.commit()
+        return int(cursor.lastrowid)
 
     def update_story_summary(self, story_id: str, new_summary: str):
         now = datetime.now(timezone.utc).isoformat()
@@ -265,15 +403,28 @@ class StoryDB:
         )
         self.conn.commit()
 
+    def update_story_taxonomy(
+        self, story_id: str, category: str, entities: list[str]
+    ):
+        self.conn.execute(
+            "UPDATE stories SET category = ?, entities = ? WHERE id = ?",
+            (category, ",".join(entities), story_id),
+        )
+        self.conn.commit()
+
     def add_timeline_entry(
             self,
             story_id: str,
             date: str,
             what_changed: str,
-            trigger_sender: str = ""):
+            trigger_sender: str = "",
+            mention_id: int | None = None):
         self.conn.execute(
-            """INSERT INTO timeline_entries (story_id, date, what_changed, trigger_sender)
-               VALUES (?, ?, ?, ?)""", (story_id, date, what_changed, trigger_sender), )
+            """INSERT INTO timeline_entries
+               (story_id, date, what_changed, trigger_sender, mention_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            (story_id, date, what_changed, trigger_sender, mention_id),
+        )
         self.conn.commit()
 
     def increment_new_info_count(self, story_id: str):

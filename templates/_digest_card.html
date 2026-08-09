@@ -12,6 +12,12 @@
       <div class="story-title">{{ s.title }}</div>
     </a>
     <div class="story-summary">{{ s.summary }}</div>
+    {% if s.topic_labels or s.content_type %}
+      <div class="story-taxonomy" aria-label="Story topics">
+        {% for label in s.topic_labels or [] %}<span>{{ label }}</span>{% endfor %}
+        {% if s.content_type %}<span>{{ s.content_type }}</span>{% endif %}
+      </div>
+    {% endif %}
     {% if s.latest_update %}
       <div class="story-latest-update"><span class="latest-update-label">Latest</span> {{ s.latest_update }}</div>
     {% endif %}

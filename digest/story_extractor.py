@@ -1,7 +1,7 @@
 import json
 import time
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from digest.gmail_fetcher import Newsletter
 from digest.pii import scrub_pii
 import digest.llm_client as llm_client
@@ -128,6 +128,8 @@ class Story:
     source_sender: str = ""
     source_gmail_url: str = ""
     date: str = ""
+    category: str = "other"
+    entities: list[str] = field(default_factory=list)
 
 def _extract_sender_name(from_field: str) -> str:
     if "<" in from_field:

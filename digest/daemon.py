@@ -13,7 +13,7 @@ import os
 import re
 import signal
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Routine (non-backfill) Telegram polls run every 5 minutes via cron and
@@ -150,6 +150,12 @@ def _persist_story(
         skip_new_info_check: bool = False,
         links: list[str] | None = None,
         content_hash: str = ""):
+    story_category = getattr(story, "category", "other")
+    if not isinstance(story_category, str) or not story_category.strip():
+        story_category = "other"
+    story_entities = getattr(story, "entities", [])
+    if not isinstance(story_entities, list):
+        story_entities = []
     quality = assess_story_quality(
         story.title,
         story.summary,
@@ -183,7 +189,7 @@ def _persist_story(
                 existing["title"], existing["summary"], story.title, story.summary,
             )
 
-        db.add_mention(
+        mention_id = db.add_mention(
             story_id=existing_id,
             title=story.title,
             summary=story.summary,
@@ -223,6 +229,11 @@ def _persist_story(
             if merged_links != existing_links:
                 db.update_story_links(existing_id, json.dumps(merged_links))
 
+        if existing and (story_category != "other" or story_entities) and (
+            not existing.get("category") or not existing.get("entities")
+        ):
+            db.update_story_taxonomy(existing_id, story_category, story_entities)
+
         if adds_new_info and what_changed:
             new_summary = updated_summary if updated_summary else f"{
                 existing['summary']} {what_changed}"
@@ -235,6 +246,7 @@ def _persist_story(
                 date=story.date,
                 what_changed=what_changed,
                 trigger_sender=story.source_sender,
+                mention_id=mention_id,
             )
             db.increment_new_info_count(existing_id)
             if existing and existing.get("is_read"):
@@ -256,7 +268,7 @@ def _persist_story(
         story_id = db.add_story(
             title=story.title,
             summary=story.summary,
-            entities=[],
+            entities=story_entities,
             embedding=embedding,
             sender=story.source_sender,
             gmail_url=story.source_gmail_url,
@@ -265,7 +277,7 @@ def _persist_story(
             mention_summary=story.summary,
             mention_raw_title=story.source_newsletter,
             mention_raw_body=story.source_email_body,
-            category="other",
+            category=story_category,
             primary_url=getattr(story, "primary_url", ""),
             primary_image_url=primary_image,
             source_type=source_type,
@@ -503,158 +515,6 @@ def process_telegram_posts(since: datetime | None = None):
 
     db.close()
 
-def _bestblogs_item_id(item: dict) -> str:
-    raw_id = str(item.get("id") or item.get("readUrl") or item.get("url") or "")
-    return f"BB_{raw_id}" if raw_id else ""
-
-_CST = timezone(timedelta(hours=8))
-
-def _bestblogs_item_dt(item: dict) -> datetime | None:
-    raw = item.get("publishDateTimeStr") or ""
-    if raw and raw != "Today":
-        try:
-            # BestBlogs' publishDateTimeStr is China Standard Time (UTC+8),
-            # not UTC — convert rather than relabel, or timestamps end up
-            # hours in the future.
-            return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S").replace(tzinfo=_CST).astimezone(timezone.utc)
-        except Exception:
-            pass
-    ts = item.get("publishTimeStamp")
-    try:
-        ts_int = int(ts)
-        if ts_int > 10_000_000_000:
-            ts_int //= 1000
-        return datetime.fromtimestamp(ts_int, tz=timezone.utc)
-    except Exception:
-        return None
-
-def _bestblogs_item_date(item: dict) -> str:
-    dt = _bestblogs_item_dt(item)
-    return dt.isoformat() if dt else datetime.now(timezone.utc).isoformat()
-
-def _bestblogs_item_to_story(item: dict):
-    from digest.story_extractor import Story
-
-    title = (item.get("title") or item.get("originalTitle") or "").strip()[:200]
-    summary = (item.get("oneSentenceSummary") or item.get("summary") or "").strip()
-    url = item.get("url") or item.get("readUrl") or ""
-    sender = item.get("sourceName") or item.get("domain") or item.get("author") or "BestBlogs"
-
-    return Story(
-        title=title,
-        summary=summary,
-        primary_url=url,
-        primary_image_url=item.get("cover") or "",
-        source_newsletter=sender,
-        source_sender=sender,
-        source_gmail_url=url,
-        date=_bestblogs_item_date(item),
-    )
-
-def process_bestblogs_items(max_items: int = 15, days: int | None = None):
-    from digest.bestblogs_client import fetch_resources
-
-    print("=" * 60)
-    label = f" (backfill: last {days}d, up to {max_items})" if days else ""
-    print(f"Sentinel BestBlogs Ingestion{label}  [{datetime.now().strftime('%Y-%m-%d %H:%M')}]")
-    print("=" * 60)
-
-    db = StoryDB()
-
-    print("\n[1/3] Fetching AI items from BestBlogs...")
-    page_size = 50 if days else max_items
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days) if days else None
-    items = []
-    page = 1
-    max_pages = 30
-    while len(items) < max_items and page <= max_pages:
-        try:
-            response = fetch_resources({
-                "type": "ALL",
-                "sortType": "time_desc",
-                "category": "ai",
-                "timeFilter": "all",
-                "language": "en_US",
-                "page": page,
-                "pageSize": page_size,
-            })
-        except Exception as e:
-            print(f"      ERROR: fetch failed on page {page}: {e}")
-            break
-
-        page_items = (response.get("data") or {}).get("dataList") or []
-        if not page_items:
-            break
-
-        if cutoff is not None:
-            in_window = []
-            hit_cutoff = False
-            for item in page_items:
-                item_dt = _bestblogs_item_dt(item)
-                if item_dt is not None and item_dt < cutoff:
-                    hit_cutoff = True
-                    break
-                in_window.append(item)
-            items.extend(in_window)
-            if hit_cutoff:
-                break
-        else:
-            items.extend(page_items)
-
-        page += 1
-
-    items = items[:max_items]
-    print(f"      {len(items)} items fetched")
-
-    new_items = []
-    for item in items:
-        item_id = _bestblogs_item_id(item)
-        if not item_id:
-            continue
-        if db.is_email_processed(item_id):
-            continue
-        new_items.append((item_id, item))
-    already = len(items) - len(new_items)
-    if already:
-        print(f"      {already} already processed — skipping")
-
-    if not new_items:
-        print("      Nothing new to process.")
-        db.close()
-        return
-
-    print(f"\n[2/3] Processing {len(new_items)} items...")
-    new_count = merged_count = evolved_count = 0
-
-    for i, (item_id, item) in enumerate(new_items, 1):
-        story = _bestblogs_item_to_story(item)
-        if not story.title or not story.summary:
-            print(f"\n  ── [{i}/{len(new_items)}] (missing title/summary — skipping)")
-            db.mark_email_processed(item_id)
-            continue
-
-        print(f"\n  ── [{i}/{len(new_items)}] {story.title[:65]}...")
-        new_count, merged_count, evolved_count, ok = _persist_story(
-            db, story, new_count, merged_count, evolved_count,
-            source_type="bestblogs",
-        )
-        if not ok:
-            print(f"      leaving for next run")
-            continue
-        db.mark_email_processed(item_id)
-
-    print(f"\n[3/3] Done")
-    print(f"      New stories:    {new_count}")
-    print(f"      Merged:         {merged_count}")
-    print(f"      Evolved:        {evolved_count}")
-
-    stats = db.get_stats()
-    print(f"\n      DB totals:")
-    print(f"      - Stories:   {stats['total_stories']}")
-    print(f"      - Mentions:  {stats['total_mentions']}")
-
-    db.close()
-
 def backfill_telegram_embeddings(days: int = 10, dry_run: bool = True):
     """Retroactively embed Telegram stories ingested before Telegram got a
     real vector-clustering path (see process_telegram_posts). If a story
@@ -752,8 +612,7 @@ def extract_x_links(days: int | None = None, limit: int = 50, dry_run: bool = Tr
     """Scan stories for embedded X/Twitter post links: directly from the
     source content's own links (email/Telegram), plus a "one hop deeper"
     fetch of each story's primary_url to catch tweets embedded in a linked
-    blog/article page (the only path that works for BestBlogs, which has no
-    link list of its own). Foundation data for a separate downstream
+    blog/article page. Foundation data for a separate downstream
     curation tool — this only extracts/stores, no liking/exporting here.
     Decoupled from the main ingestion crons since it makes an outbound
     fetch per story to an arbitrary external site."""
@@ -847,20 +706,6 @@ if __name__ == "__main__":
         default=None,
         help="Backfill TG posts from this date (YYYY-MM-DD), e.g. --telegram-since 2026-04-12")
     parser.add_argument(
-        "--bestblogs",
-        action="store_true",
-        help="Fetch and ingest the latest AI items from BestBlogs instead of Gmail")
-    parser.add_argument(
-        "--bestblogs-backfill-days",
-        type=int,
-        default=None,
-        help="Backfill BestBlogs items from the last N days (paginates, capped by --bestblogs-backfill-max)")
-    parser.add_argument(
-        "--bestblogs-backfill-max",
-        type=int,
-        default=300,
-        help="Max items to pull for --bestblogs-backfill-days (default: 300)")
-    parser.add_argument(
         "--backfill-telegram-embeddings",
         action="store_true",
         help="Retroactively embed/merge existing Telegram stories from the last N days (see --days, --execute)")
@@ -928,22 +773,6 @@ if __name__ == "__main__":
             sys.exit(1)
         finally:
             signal.alarm(0)
-            _release_lock()
-        sys.exit(0)
-
-    if args.bestblogs:
-        _acquire_lock("bestblogs")
-        try:
-            process_bestblogs_items(
-                max_items=args.bestblogs_backfill_max if args.bestblogs_backfill_days else 15,
-                days=args.bestblogs_backfill_days,
-            )
-        except Exception as e:
-            print(f"\nERROR: {e}")
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
-        finally:
             _release_lock()
         sys.exit(0)
 

@@ -61,7 +61,6 @@ GMAIL_CREDENTIALS_PATH=state/credentials.json
 GMAIL_TOKEN_PATH=state/token.json
 STORIES_DB=state/stories.db
 SENDER_SIGNALS_PATH=state/sender_signals.json
-BESTBLOGS_API_BASE=https://www.bestblogs.dev/api/proxy
 ```
 
 Everything under `state/` is local runtime data and is intentionally ignored by git.
@@ -223,7 +222,6 @@ CRON_EMAIL_SCHEDULE="*/5 * * * *"
 CRON_TELEGRAM_SCHEDULE="*/5 * * * *"
 CRON_SOCIAL_SCHEDULE="*/5 * * * *"
 CRON_YOUTUBE_SCHEDULE="*/5 * * * *"
-CRON_BESTBLOGS_SCHEDULE="*/5 * * * *"
 CRON_RAINDROP_SCHEDULE="*/5 * * * *"
 CRON_X_LINKS_SCHEDULE="*/5 * * * *"
 ```
@@ -247,6 +245,7 @@ state/daemon.log
 state/telegram.log
 state/social.log
 state/youtube.log
+state/slack.log
 ```
 
 Live sync state is also written to:
@@ -256,7 +255,49 @@ state/sync_status_email.json
 state/sync_status_telegram.json
 state/sync_status_social.json
 state/sync_status_youtube.json
+state/sync_status_slack.json
 ```
+
+## Slack delivery
+
+Slack delivery is disabled by default. Sentinel posts through a bot token from
+the server. Browser JavaScript never receives the token.
+
+Create a Slack app from `slack-app-manifest.yaml`, install it in the personal
+workspace, create the canonical and source channels, and invite the Sentinel
+bot to every channel. Copy each channel ID and the `xoxb-` bot token into
+`.env`. Only the `chat:write` bot scope is required because Sentinel uses
+explicit channel IDs.
+
+Suggested channels are `sentinel-all`, `sentinel-email`,
+`sentinel-telegram`, `sentinel-x`, `sentinel-linkedin`,
+`sentinel-youtube`, and `sentinel-raindrop`.
+
+Preview and initialize the root-only historical backfill before enabling live
+delivery:
+
+```bash
+python -m digest.slack_delivery --validate
+python -m digest.slack_delivery --preview-backfill
+python -m digest.slack_delivery --init-backfill
+python -m digest.slack_delivery --status
+```
+
+Initialization only creates durable outbox records. It does not call Slack.
+After a manual test, set `SLACK_ENABLED=true`. The one-minute Slack job sends
+oldest to newest and drains for at most 50 seconds per run:
+
+```bash
+scripts/run-slack.sh
+python -m digest.slack_delivery --reconcile
+python -m digest.slack_delivery --drain --max-runtime 50
+python -m digest.slack_delivery --retry-blocked
+```
+
+Historical mentions and timeline entries are intentionally suppressed during
+the initial import. New source coverage and new timeline evolution are posted
+as broadcast replies under the immutable canonical story message. Each reply
+appears in the canonical channel and remains part of the story thread.
 
 ## Common Commands
 
@@ -267,6 +308,7 @@ python -m digest.daemon --telegram
 python -m ingest.social_scraper --all
 python -m ingest.youtube_sync
 python -m ingest.raindrop_sync
+python -m digest.slack_delivery --status
 flask --app app run --host 127.0.0.1 --port 5000
 ```
 

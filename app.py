@@ -20,6 +20,7 @@ from digest.gmail_fetcher import fetch_newsletter_by_id, message_id_from_gmail_u
 from digest.sender_signal import sender_signal_for_story
 from digest.story_quality import assess_story_quality
 from digest.bookmarks import list_bookmarks
+from digest.search import lexical_rankings, reciprocal_rank_fusion
 
 HERE = pathlib.Path(__file__).resolve().parent
 STORIES_DB_PATH = pathlib.Path(STORIES_DB)
@@ -32,18 +33,19 @@ SYNC_TARGETS = {
         ("telegram", "Telegram", SCRIPTS_DIR / "run-telegram.sh"),
         ("social", "Social", SCRIPTS_DIR / "run-social.sh"),
         ("youtube", "YouTube", SCRIPTS_DIR / "run-youtube.sh"),
-        ("bestblogs", "BestBlogs", SCRIPTS_DIR / "run-bestblogs.sh"),
         ("raindrop", "Raindrop", SCRIPTS_DIR / "run-raindrop.sh"),
+        ("slack", "Slack", SCRIPTS_DIR / "run-slack.sh"),
     ],
     "email": [("email", "Email", SCRIPTS_DIR / "run-email.sh")],
     "telegram": [("telegram", "Telegram", SCRIPTS_DIR / "run-telegram.sh")],
     "twitter": [("social", "Social", SCRIPTS_DIR / "run-social.sh")],
     "linkedin": [("social", "Social", SCRIPTS_DIR / "run-social.sh")],
     "youtube": [("youtube", "YouTube", SCRIPTS_DIR / "run-youtube.sh")],
-    "bestblogs": [("bestblogs", "BestBlogs", SCRIPTS_DIR / "run-bestblogs.sh")],
+    "slack": [("slack", "Slack", SCRIPTS_DIR / "run-slack.sh")],
 }
 STORY_DETAIL_COLUMNS = """id, title, summary, first_seen, last_updated,
 mention_count, new_info_count, is_read, primary_url, primary_url_host,
+COALESCE(category, '') AS category, COALESCE(entities, '') AS entities,
 COALESCE(skipped, 0) AS skipped,
 COALESCE(source_type, 'email') AS source_type,
 COALESCE(primary_image_url, '') AS primary_image_url,
@@ -94,6 +96,47 @@ def _parse_links_json(raw: str) -> list[dict]:
         return out
     except Exception:
         return []
+
+
+def _apply_story_taxonomy(story: dict) -> dict:
+    raw_entities = story.get("entities") or ""
+    labels = [item.strip() for item in raw_entities.split(",") if item.strip()]
+    content_type = ""
+    topics = []
+    for label in labels:
+        if label.startswith("content_type:"):
+            content_type = label.split(":", 1)[1].replace("_", " ").title()
+        else:
+            topics.append(label)
+    category = (story.get("category") or "").strip()
+    if category and category not in topics and category != "other":
+        topics.insert(0, category)
+    story["topic_labels"] = topics[:5]
+    story["content_type"] = content_type
+    return story
+
+
+def _hybrid_search_scores(conn: sqlite3.Connection, query: str) -> dict[str, float]:
+    lexical_ids = lexical_rankings(conn, query)
+    semantic_ids: list[str] = []
+    try:
+        import digest.llm_client as llm_client
+
+        embedding = llm_client.embed(input_text=query).embeddings[0]
+        collection = _get_chroma_collection()
+        count = collection.count()
+        if count:
+            results = collection.query(
+                query_embeddings=[embedding],
+                n_results=min(count, 2000),
+            )
+            if results and results.get("ids"):
+                semantic_ids = results["ids"][0]
+    except Exception:
+        # Search remains useful with FTS5 when the embedding provider is
+        # unavailable or rate-limited.
+        semantic_ids = []
+    return reciprocal_rank_fusion(lexical_ids, semantic_ids)
 
 def _parse_iso_ts(s: str) -> int:
     dt = _parse_iso_dt(s)
@@ -332,6 +375,8 @@ def _external_row_to_story(row: sqlite3.Row) -> dict:
         "source_label": _source_label(source),
         "primary_image_url": row["cover"] or "",
         "links": links,
+        "topic_labels": [],
+        "content_type": "",
         "senders": [author] if author else [source],
         "author": author,
         "source_rank": int(source_rank or 0),
@@ -594,7 +639,10 @@ def _all_sync_statuses() -> list[dict]:
                 continue
             seen.add(key)
             statuses.append(_read_sync_status(key, label))
-    order = {"email": 0, "telegram": 1, "social": 2, "youtube": 3, "raindrop": 4}
+    order = {
+        "email": 0, "telegram": 1, "social": 2, "youtube": 3,
+        "raindrop": 4, "slack": 5,
+    }
     statuses.sort(key=lambda item: order.get(item["job"], 99))
     return statuses
 
@@ -609,10 +657,7 @@ def home_feed():
 
 @app.route("/digest")
 def digest_list():
-    return _render_digest_feed(
-        nav_active="following", feed_path="/digest",
-        default_excluded_sources={"bestblogs"},
-    )
+    return _render_digest_feed(nav_active="following", feed_path="/digest")
 
 
 def _nav_source_counts() -> list[dict]:
@@ -698,6 +743,8 @@ def _render_digest_feed(
                   primary_url, primary_url_host,
                   COALESCE(skipped, 0) AS skipped,
                   COALESCE(source_type, 'email') AS source_type,
+                  COALESCE(category, '') AS category,
+                  COALESCE(entities, '') AS entities,
                   COALESCE(primary_image_url, '') AS primary_image_url,
                   COALESCE(links_json, '') AS links_json
              FROM stories
@@ -722,6 +769,13 @@ def _render_digest_feed(
              ) latest ON t.story_id = latest.story_id AND t.id = latest.max_id"""
     ).fetchall()
     external_stories = _load_external_stories(conn)
+
+    q = (request.args.get("q") or "").strip()
+    clauses = parse_clauses(q) if q else []
+    search_text = " ".join(
+        clause["val"] for clause in clauses if not clause.get("op")
+    ).strip()
+    search_scores = _hybrid_search_scores(conn, search_text) if search_text else {}
     conn.close()
 
     latest_update_by_story = {
@@ -748,7 +802,6 @@ def _render_digest_feed(
             latest_mention_dt_by_story[row["story_id"]] = mention_dt
 
     now_t = int(time.time())
-    q = (request.args.get("q") or "").strip()
 
     sort = (request.args.get("sort") or "recent").strip().lower()
     state = (request.args.get("state") or "").strip().lower()
@@ -762,10 +815,7 @@ def _render_digest_feed(
         ts = _parse_iso_ts(row["last_updated"])
         latest_mention_dt = latest_mention_dt_by_story.get(row["id"])
         source_type = (row["source_type"] or "email").strip().lower()
-        # Use the latest actual mention/publish date for the displayed
-        # recency whenever we have one, not just for email — otherwise a
-        # bestblogs/telegram story's card shows ingestion time while its own
-        # mention list shows publish time, which can disagree by hours.
+        # Use the latest actual mention/publish date for displayed recency.
         if latest_mention_dt is not None:
             ts = int(latest_mention_dt.timestamp())
             display_time = latest_mention_dt.astimezone(APP_TIMEZONE).isoformat()
@@ -792,6 +842,8 @@ def _render_digest_feed(
             "skipped": bool(row["skipped"]),
             "source_type": source_type,
             "source_label": _source_label(source_type),
+            "category": row["category"] or "",
+            "entities": row["entities"] or "",
             "primary_image_url": row["primary_image_url"] or "",
             "links": _parse_links_json(row["links_json"]),
             "senders": [],
@@ -799,6 +851,7 @@ def _render_digest_feed(
             "sort_ts": ts,
             "latest_update": latest_update_by_story.get(row["id"], {}).get("what_changed", ""),
         }
+        _apply_story_taxonomy(story)
         seen_senders = set()
         unique_senders = []
         for sender in senders_by_story.get(row["id"], []):
@@ -833,6 +886,11 @@ def _render_digest_feed(
             story["distinct_source_types"] = sorted(set(raw_source_types))
         else:
             story["distinct_source_types"] = [story["source_type"]]
+        story["other_source_labels"] = [
+            _source_label(item)
+            for item in story["distinct_source_types"]
+            if item != source_type
+        ]
 
         if not story["skipped"]:
             source_count_map[story["source_type"]] = source_count_map.get(
@@ -861,10 +919,7 @@ def _render_digest_feed(
         story["dev_lane_sender_count"] = 0
         all_stories.append(story)
 
-    # Sidebar facets omit default_excluded_sources (e.g. Following hides the
-    # BestBlogs facet), but `known_sources` for query-param validation stays
-    # the full set — an explicit ?source=bestblogs must still work on either
-    # route, only the *implicit* default view differs between Home/Following.
+    # Sidebar facets omit sources excluded by the current feed route.
     nav_count_map = {
         k: v for k, v in source_count_map.items() if k not in default_excluded_sources
     }
@@ -875,8 +930,6 @@ def _render_digest_feed(
     known_sources = set(source_count_map.keys())
     if source != "all" and source not in known_sources:
         source = "all"
-
-    clauses = parse_clauses(q) if q else []
 
     stories = all_stories
     if source != "all":
@@ -894,13 +947,28 @@ def _render_digest_feed(
         )
         if not wants_skipped and state != "skipped":
             stories = [story for story in stories if not story["skipped"]]
-        if clauses:
+        if search_text:
+            matched = []
+            for story in stories:
+                score = search_scores.get(story["id"])
+                if score is None and _match_story(
+                    story,
+                    [clause for clause in clauses if not clause.get("op")],
+                    senders_by_story.get(story["id"], story.get("senders", [])),
+                ):
+                    score = 0.001
+                if score is not None:
+                    story["search_score"] = score
+                    matched.append(story)
+            stories = matched
+        structured_clauses = [clause for clause in clauses if clause.get("op")]
+        if structured_clauses:
             stories = [
                 story
                 for story in stories
                 if _match_story(
                     story,
-                    clauses,
+                    structured_clauses,
                     senders_by_story.get(story["id"], story.get("senders", [])),
                 )
             ]
@@ -918,7 +986,15 @@ def _render_digest_feed(
         rank = int(story.get("source_rank") or 0)
         return -rank if rank else 0
 
-    if sort == "mentions":
+    if search_text:
+        stories.sort(
+            key=lambda story: (
+                story.get("search_score", 0.0),
+                story.get("sort_ts") or 0,
+            ),
+            reverse=True,
+        )
+    elif sort == "mentions":
         stories.sort(
             key=lambda story: (
                 story["mention_count"],
@@ -998,6 +1074,8 @@ def _render_digest_feed(
                 "source_type": story["source_type"],
                 "source_label": story["source_label"],
                 "primary_image_url": story["primary_image_url"],
+                "topic_labels": story.get("topic_labels", []),
+                "content_type": story.get("content_type", ""),
                 "skipped": story["skipped"],
             }
             for story in page_stories
@@ -1136,9 +1214,11 @@ def api_digest_story(story_id: str):
         }
         story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
         story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
+        _apply_story_taxonomy(story)
         return jsonify({"story": story, "mentions": [mention], "timeline": []})
     story = dict(row)
     story["links"] = _parse_links_json(story.get("links_json") or "")
+    _apply_story_taxonomy(story)
     story["last_updated_relative"] = _relative_time_label(story.get("last_updated") or "")
     story["first_seen_relative"] = _relative_time_label(story.get("first_seen") or "")
     mentions = [

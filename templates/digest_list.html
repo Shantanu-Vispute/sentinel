@@ -61,9 +61,24 @@ body {
 }
 .nav-tabs a:hover { color: var(--text); }
 .nav-tabs a.active { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.topbar-search {
+  flex: 0 1 280px; min-width: 180px;
+  display: flex; align-items: center;
+}
+.topbar-search input {
+  width: 100%; padding: 9px 12px; border: 1px solid var(--border);
+  border-radius: 9px; background: var(--bg); color: var(--text);
+  font: 13px/1.2 "Inter", sans-serif; outline: none;
+}
+.topbar-search input::placeholder { color: var(--text-subtle); }
+.topbar-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 .main { padding: 32px 48px 120px; }
-@media (max-width: 860px) { .main { padding: 20px 20px 80px; } .topbar { padding: 12px 20px; flex-wrap: wrap; } }
+@media (max-width: 860px) {
+  .main { padding: 20px 20px 80px; }
+  .topbar { padding: 12px 20px; flex-wrap: wrap; }
+  .topbar-search { order: 3; flex: 1 1 100%; }
+}
 .page-header h1 {
   font-family: "Inter", sans-serif; font-weight: 700; font-size: 26px;
   letter-spacing: -0.03em; margin: 0 0 4px;
@@ -71,6 +86,12 @@ body {
 .page-header .subtitle { color: var(--text-subtle); font-size: 14px; margin-bottom: 22px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(369px, 1fr)); gap: 18px; }
+
+.story-taxonomy { display: flex; flex-wrap: wrap; gap: 5px; }
+.story-taxonomy span {
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 7px;
+  color: var(--text-subtle); font-size: 10.5px; line-height: 1.2;
+}
 
 .story-card {
   background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
@@ -341,6 +362,24 @@ html:not([data-theme="dark"]) .moon { display: none; }
   if (saved === "dark" || (saved === null && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
     document.documentElement.setAttribute("data-theme", "dark");
   }
+  document.addEventListener("DOMContentLoaded", function () {
+    var button = document.getElementById("themeToggle");
+    if (!button) return;
+    button.addEventListener("click", function () {
+      var html = document.documentElement;
+      var dark = html.getAttribute("data-theme") === "dark";
+      if (dark) html.removeAttribute("data-theme");
+      else html.setAttribute("data-theme", "dark");
+      localStorage.setItem("theme", dark ? "light" : "dark");
+      button.setAttribute("aria-label", dark ? "Switch to dark mode" : "Switch to light mode");
+    });
+    button.setAttribute(
+      "aria-label",
+      document.documentElement.getAttribute("data-theme") === "dark"
+        ? "Switch to light mode"
+        : "Switch to dark mode"
+    );
+  });
 })();
 </script>
 </head>
@@ -363,12 +402,26 @@ html:not([data-theme="dark"]) .moon { display: none; }
   <nav class="nav-tabs">
     <a href="/home" class="{% if nav_active == 'home' and (not source or source == 'all') %}active{% endif %}">For You</a>
     <a href="/digest" class="{% if nav_active == 'following' %}active{% endif %}">Following</a>
-    {% for item in source_counts if item.source not in ('bestblogs', 'youtube') %}
+    {% for item in source_counts if item.source != 'youtube' %}
     <a href="/home?source={{ item.source }}" class="{% if source == item.source %}active{% endif %}">{{ item.label }}</a>
     {% endfor %}
     <a href="/bookmarks">Bookmarks</a>
   </nav>
+  <form class="topbar-search" action="{{ feed_path or '/home' }}" method="get" role="search">
+    <input
+      type="search"
+      name="q"
+      value="{{ q or '' }}"
+      placeholder="Search stories…"
+      aria-label="Search stories"
+      autocomplete="off">
+    {% if source and source != 'all' %}<input type="hidden" name="source" value="{{ source }}">{% endif %}
+  </form>
   <div class="topbar-spacer" aria-hidden="true"></div>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch to dark mode" title="Toggle light and dark mode">
+    <span class="sun" aria-hidden="true">☀</span>
+    <span class="moon" aria-hidden="true">☾</span>
+  </button>
 </header>
 
 <main class="main">

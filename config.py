@@ -36,6 +36,13 @@ def _int_env(name: str, default: int) -> int:
     return default if raw is None or raw == "" else int(raw)
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _path_env(name: str, default: Path) -> str:
     raw = os.getenv(name)
     path = Path(raw) if raw else default
@@ -86,7 +93,20 @@ GMAIL_TOKEN_PATH = _path_env("GMAIL_TOKEN_PATH", HERE / "state" / "token.json")
 SENDER_SIGNALS_PATH = _path_env(
     "SENDER_SIGNALS_PATH", HERE / "state" / "sender_signals.json"
 )
-BESTBLOGS_API_BASE = os.getenv(
-    "BESTBLOGS_API_BASE",
-    "https://www.bestblogs.dev/api/proxy",
+SLACK_ENABLED = _bool_env("SLACK_ENABLED", False)
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
+SLACK_API_BASE = os.getenv(
+    "SLACK_API_BASE", "https://slack.com/api"
 ).rstrip("/")
+SLACK_WORKER_MAX_RUNTIME_SECONDS = _int_env(
+    "SLACK_WORKER_MAX_RUNTIME_SECONDS", 50
+)
+SLACK_CHANNEL_CANONICAL = os.getenv("SLACK_CHANNEL_CANONICAL", "").strip()
+SLACK_CHANNELS = {
+    "email": os.getenv("SLACK_CHANNEL_EMAIL", "").strip(),
+    "telegram": os.getenv("SLACK_CHANNEL_TELEGRAM", "").strip(),
+    "twitter": os.getenv("SLACK_CHANNEL_TWITTER", "").strip(),
+    "linkedin": os.getenv("SLACK_CHANNEL_LINKEDIN", "").strip(),
+    "youtube": os.getenv("SLACK_CHANNEL_YOUTUBE", "").strip(),
+    "raindrop": os.getenv("SLACK_CHANNEL_RAINDROP", "").strip(),
+}
